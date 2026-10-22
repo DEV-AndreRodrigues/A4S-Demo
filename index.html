@@ -939,22 +939,32 @@ function configView(){
     <div class="cfg-grid">
       <section class="panel cfg-section">
         <h2>API da plataforma</h2>
-        <p class="hint">Token e secret são guardados neste navegador. <strong>PIN é opcional</strong>: deixe em branco para desbloquear automaticamente ao abrir o app (recomendado para uso interno). Preencha um PIN para proteger com senha. Depois de salvos, token e secret nunca são exibidos; para trocar, preencha os dois de novo.</p>
+        <p class="hint">O endpoint é salvo neste dispositivo. As credenciais ficam embutidas no app e são desbloqueadas automaticamente pela senha de acesso.</p>
         <div id="credStatus">${credStatusHtml()}</div>
         ${inp('cApiBase','Endpoint', c.apiBase, 'url', 'https://…')}
-        <div class="fields">
-          ${inp('crToken', has?'Novo token':'Token', '', 'password')}
-          ${inp('crSecret', has?'Novo secret':'Secret', '', 'password')}
-        </div>
-        <div class="fields">
-          ${inp('crPin', 'PIN (opcional — deixe vazio para auto-desbloquear)', '', 'password')}
-          ${inp('crPin2', 'Confirme o PIN (se definido)', '', 'password')}
-        </div>
         <div class="cfg-foot">
           <span class="msg" id="apiMsg" role="status"></span>
-          ${has?'<button class="btn outline" type="button" id="credRemove" style="border-color:var(--red);color:var(--red)">Remover credenciais</button>':''}
-          <button class="btn outline-purple" type="button" id="apiTest"${has&&c.apiBase?'':' disabled'}>Testar conexão</button>
-          <button class="btn primary" type="button" id="apiSave"${cryptoOk?'':' disabled'}>Salvar</button>
+          <button class="btn outline-purple" type="button" id="apiTest"${state.creds&&c.apiBase?'':' disabled'}>Testar conexão</button>
+          <button class="btn primary" type="button" id="apiSave">Salvar endpoint</button>
+        </div>
+      </section>
+
+      <section class="panel cfg-section" id="adminCredSection">
+        <h2>Credenciais da equipe <span style="font-size:13px;font-weight:400;color:var(--muted)">(somente admin)</span></h2>
+        <p class="hint">Preencha os campos e clique em <strong>Gerar blob</strong>. Copie o resultado e envie para quem atualiza o código — ele substitui a constante <code>EMBEDDED_CREDS</code> no HTML e publica. Após publicar, todos os dispositivos ganham acesso automático ao entrar com a senha correta.</p>
+        <div class="fields">
+          <div class="field"><label for="adF1">Campo de integração 1</label><input id="adF1" type="password" autocomplete="off" spellcheck="false"></div>
+          <div class="field"><label for="adF2">Campo de integração 2</label><input id="adF2" type="password" autocomplete="off" spellcheck="false"></div>
+          <div class="field"><label for="adPwd">Senha de acesso atual</label><input id="adPwd" type="password" autocomplete="off"></div>
+        </div>
+        <div class="cfg-foot">
+          <span class="msg" id="adminMsg" role="status"></span>
+          <button class="btn primary" type="button" id="adminGenBlob">Gerar blob</button>
+        </div>
+        <div id="adminBlobOut" class="hidden" style="margin-top:16px">
+          <p style="font-weight:500;margin:0 0 6px">Substitua <code>let EMBEDDED_CREDS = null</code> por esta linha no index.html:</p>
+          <textarea id="adminBlobText" rows="3" style="width:100%;font-family:monospace;font-size:12px;padding:10px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2);resize:vertical" readonly></textarea>
+          <div class="actions" style="margin-top:8px"><button class="btn outline" type="button" id="adminBlobCopy">Copiar</button></div>
         </div>
       </section>
 
@@ -1030,25 +1040,13 @@ function resetPanicData(){ state.oauth=null; Object.assign(state.panic,{workers:
 async function saveApiFromForm(){
   const msg = $('#apiMsg'); const set=(t,ok)=>{ msg.textContent=t; msg.className='msg '+(ok?'ok':'err'); };
   const endpoint=$('#cApiBase').value.trim();
-  const token=$('#crToken').value.trim(), secret=$('#crSecret').value.trim(), pin=$('#crPin').value, pin2=$('#crPin2').value;
   if (!endpoint) return set('Informe o endpoint.');
   if (!/^https?:\/\/\S+$/i.test(endpoint)) return set('O endpoint precisa começar com http:// ou https://.');
-  const changingCreds = token || secret || pin || pin2;
-  if (!credRecord() && !changingCreds) return set('Informe token e secret.');
-  if (changingCreds){
-    if (!token || !secret) return set('Para salvar ou trocar credenciais, preencha token e secret.');
-    if (pin && pin.length<6) return set('O PIN precisa ter ao menos 6 caracteres (ou deixe vazio para salvar sem senha).');
-    if (pin && pin!==pin2) return set('Os PINs não conferem.');
-    try{
-      localStorage.setItem(CRED_KEY, JSON.stringify(await sealCreds({token, secret}, pin)));
-      state.creds = {token, secret};
-    }catch(e){ return set('Não foi possível salvar as credenciais neste navegador.'); }
-  }
   const endpointChanged = endpoint !== state.cfg.apiBase;
   state.cfg.apiBase = endpoint; saveCfg();
-  if (endpointChanged || changingCreds) resetPanicData();
+  if (endpointChanged) resetPanicData();
   route();
-  const m=$('#apiMsg'); m.textContent = changingCreds ? 'Endpoint e credenciais salvos.' : 'Endpoint salvo.'; m.className='msg ok';
+  const m=$('#apiMsg'); m.textContent='Endpoint salvo.'; m.className='msg ok';
 }
 /* ---------- Log do teste de conexão ---------- */
 const LVL = {info:['info','Info'], ok:['ok','OK'], warn:['sim','Atenção'], err:['err','Erro']};
@@ -1240,6 +1238,33 @@ document.addEventListener('click', e=>{
       try{ const r=await fetchT(($('#cBridge').value.trim()||DEFAULTS.bridgeUrl).replace(/\/+$/,'')+'/health',{method:'GET'},4000); const j=await r.json();
         m.textContent = j.ok ? 'Ponte ativa.' : 'Ponte respondeu com erro.'; m.className='msg '+(j.ok?'ok':'err'); }
       catch(e){ m.textContent='Ponte desligada. Execute ponte_smart_safety.py.'; m.className='msg err'; } })(); return;
+    case 'adminGenBlob': {
+      const f1=$('#adF1'), f2=$('#adF2'), pw=$('#adPwd'), m=$('#adminMsg');
+      if (!f1||!f2||!pw) return;
+      const v1=f1.value.trim(), v2=f2.value.trim(), pwd=pw.value;
+      if (!v1||!v2) { m.textContent='Preencha os dois campos de integração.'; m.className='msg err'; return; }
+      if (!pwd) { m.textContent='Informe a senha de acesso.'; m.className='msg err'; return; }
+      m.textContent='Gerando…'; m.className='msg';
+      try{
+        const ok = await gateCheck(pwd).catch(()=>false);
+        if (!ok){ m.textContent='Senha de acesso incorreta.'; m.className='msg err'; return; }
+        const key = await deriveSessionKey(pwd);
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const ct = await crypto.subtle.encrypt({name:'AES-GCM',iv}, key, new TextEncoder().encode(JSON.stringify({token:v1,secret:v2})));
+        const blob = {v:2, iv:b64(iv), ct:b64(ct)};
+        const line = `let EMBEDDED_CREDS = ${JSON.stringify(blob)};`;
+        $('#adminBlobText').value = line;
+        $('#adminBlobOut').classList.remove('hidden');
+        m.textContent='Blob gerado com sucesso.'; m.className='msg ok';
+        f1.value=''; f2.value=''; pw.value='';
+      } catch(e){ m.textContent='Erro ao gerar blob: '+e.message; m.className='msg err'; }
+      return;
+    }
+    case 'adminBlobCopy': {
+      const ta=$('#adminBlobText'); if(!ta) return;
+      navigator.clipboard.writeText(ta.value).then(()=>toast('Blob copiado!')).catch(()=>{ ta.select(); document.execCommand('copy'); toast('Blob copiado!'); });
+      return;
+    }
     case 'credRemove':
       if (confirm('Remover as credenciais deste navegador? Será preciso cadastrá-las de novo.')){ localStorage.removeItem(CRED_KEY); state.creds=null; state.oauth=null; route(); toast('Credenciais removidas.'); }
       return;
@@ -1280,8 +1305,16 @@ window.addEventListener('beforeunload', e=>{ if(Object.keys(state.timers).length
 /* ================= Acesso ================= */
 // Só o hash PBKDF2 da senha fica no arquivo, nunca a senha.
 const GATE = {salt:'YE1hfL71wOwFB5TclqXEdw==', hash:'tvp4DbQ4j3kCnMdJpkYGereyhtc+G1OmvrTfi/EbJPs=', iter:250000};
+// Credenciais da equipe: blob gerado pelo admin e embutido aqui. null = não configurado.
+let EMBEDDED_CREDS = null; // {"v":2,"salt":"...","iv":"...","ct":"..."}
 const GATE_KEY = 'a4s-demo-gen-session';
 let gateFails = 0, gateLockUntil = 0, started = false;
+async function deriveSessionKey(pwd){
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pwd), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    {name:'PBKDF2', salt:unb64(GATE.salt), iterations:GATE.iter, hash:'SHA-256'},
+    base, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
+}
 async function gateCheck(pwd){
   const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pwd), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits({name:'PBKDF2', salt:unb64(GATE.salt), iterations:GATE.iter, hash:'SHA-256'}, base, 256);
@@ -1320,6 +1353,15 @@ $('#gateForm').addEventListener('submit', async e=>{
   if (ok){
     gateFails = 0;
     try{ sessionStorage.setItem(GATE_KEY, '1'); }catch(e){}
+    // derivar chave de sessão e desbloquear credenciais embutidas
+    if (EMBEDDED_CREDS && !state.creds){
+      try{
+        const key = await deriveSessionKey($('#gatePwd').value);
+        const blob = EMBEDDED_CREDS;
+        const decrypted = await crypto.subtle.decrypt({name:'AES-GCM', iv:unb64(blob.iv)}, key, unb64(blob.ct));
+        state.creds = JSON.parse(new TextDecoder().decode(decrypted));
+      }catch(_){}
+    }
     $('#gatePwd').value=''; msg.textContent='';
     startApp();
   } else {
