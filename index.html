@@ -482,17 +482,23 @@ async function deriveKey(pin, salt){
   return crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:310000, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
 }
 async function sealCreds(obj, pin){
+  if (!pin){
+    return {v:1, nopin:true, plain:btoa(unescape(encodeURIComponent(JSON.stringify(obj)))), updatedAt:new Date().toISOString()};
+  }
   const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await deriveKey(pin, salt);
   const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, new TextEncoder().encode(JSON.stringify(obj)));
   return {v:1, salt:b64(salt), iv:b64(iv), ct:b64(ct), updatedAt:new Date().toISOString()};
 }
 async function openCreds(rec, pin){
+  if (rec.nopin){
+    return JSON.parse(decodeURIComponent(escape(atob(rec.plain))));
+  }
   const key = await deriveKey(pin, unb64(rec.salt));
   const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv:unb64(rec.iv)}, key, unb64(rec.ct));
   return JSON.parse(new TextDecoder().decode(pt));
 }
-function credRecord(){ try{ const r = JSON.parse(localStorage.getItem(CRED_KEY)); return r && r.ct ? r : null; }catch(e){ return null; } }
+function credRecord(){ try{ const r = JSON.parse(localStorage.getItem(CRED_KEY)); return r && (r.ct || r.plain) ? r : null; }catch(e){ return null; } }
 
 let pinWaiter = null;
 function askPin(){
@@ -514,7 +520,12 @@ async function submitPin(){
 let unlocking = null;
 async function ensureUnlocked(){
   if (state.creds) return state.creds;
-  if (!credRecord()) return null;
+  const rec = credRecord();
+  if (!rec) return null;
+  if (rec.nopin){
+    state.creds = await openCreds(rec, '');
+    return state.creds;
+  }
   if (!unlocking) unlocking = askPin().finally(()=>{ unlocking=null; });
   return unlocking;
 }
@@ -928,7 +939,7 @@ function configView(){
     <div class="cfg-grid">
       <section class="panel cfg-section">
         <h2>API da plataforma</h2>
-        <p class="hint">Token e secret são criptografados com o PIN e guardados só neste navegador. Depois de salvos, nunca são exibidos: para trocar, preencha os dois de novo. Para alterar só o endpoint, deixe token e secret em branco.</p>
+        <p class="hint">Token e secret são guardados neste navegador. <strong>PIN é opcional</strong>: deixe em branco para desbloquear automaticamente ao abrir o app (recomendado para uso interno). Preencha um PIN para proteger com senha. Depois de salvos, token e secret nunca são exibidos; para trocar, preencha os dois de novo.</p>
         <div id="credStatus">${credStatusHtml()}</div>
         ${inp('cApiBase','Endpoint', c.apiBase, 'url', 'https://…')}
         <div class="fields">
@@ -936,8 +947,8 @@ function configView(){
           ${inp('crSecret', has?'Novo secret':'Secret', '', 'password')}
         </div>
         <div class="fields">
-          ${inp('crPin', 'PIN (mínimo 6 caracteres)', '', 'password')}
-          ${inp('crPin2', 'Confirme o PIN', '', 'password')}
+          ${inp('crPin', 'PIN (opcional — deixe vazio para auto-desbloquear)', '', 'password')}
+          ${inp('crPin2', 'Confirme o PIN (se definido)', '', 'password')}
         </div>
         <div class="cfg-foot">
           <span class="msg" id="apiMsg" role="status"></span>
@@ -1023,11 +1034,11 @@ async function saveApiFromForm(){
   if (!endpoint) return set('Informe o endpoint.');
   if (!/^https?:\/\/\S+$/i.test(endpoint)) return set('O endpoint precisa começar com http:// ou https://.');
   const changingCreds = token || secret || pin || pin2;
-  if (!credRecord() && !changingCreds) return set('Informe token, secret e PIN.');
+  if (!credRecord() && !changingCreds) return set('Informe token e secret.');
   if (changingCreds){
     if (!token || !secret) return set('Para salvar ou trocar credenciais, preencha token e secret.');
-    if (pin.length<6) return set('O PIN precisa ter ao menos 6 caracteres.');
-    if (pin!==pin2) return set('Os PINs não conferem.');
+    if (pin && pin.length<6) return set('O PIN precisa ter ao menos 6 caracteres (ou deixe vazio para salvar sem senha).');
+    if (pin && pin!==pin2) return set('Os PINs não conferem.');
     try{
       localStorage.setItem(CRED_KEY, JSON.stringify(await sealCreds({token, secret}, pin)));
       state.creds = {token, secret};
@@ -1282,6 +1293,11 @@ async function gateCheck(pwd){
 function startApp(){
   document.body.classList.remove('locked');
   if (!started){ started = true; loadCfg(); applyMode(); }
+  // auto-desbloquear credenciais sem PIN
+  const rec = credRecord();
+  if (rec && rec.nopin && !state.creds){
+    openCreds(rec,'').then(c=>{ state.creds=c; }).catch(()=>{});
+  }
   route();
 }
 function lockApp(){
