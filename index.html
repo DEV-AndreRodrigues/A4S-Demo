@@ -366,7 +366,7 @@ const DEFAULTS = {
   tenant:'A4S Demonstração',
   apiBase:'https://api.smartsuite.a4s.io', ingestPath:'/events', workersPath:'/platform/employees?page=1&limit=100', placesPath:'/platform/places?page=1&limit=100',
   authMode:'headers', tokenHeader:'Authorization', tokenPrefix:'Bearer ', secretHeader:'X-Integration-Secret', tokenUrl:'',
-  listPath:'data|items|results|rows', bridgeUrl:'http://127.0.0.1:8765', useBridgeApi:true,
+  listPath:'data|items|results|rows', bridgeUrl:'http://127.0.0.1:8765', useBridgeApi:false,
   wId:'id|_id|uuid', wNome:'name|nome|fullName', wMat:'registration|matricula|enrollment', wDev:'tag|tagId|device|devices|deviceId',
   pId:'id|_id|uuid', pNome:'name|nome', pDev:'devices|deviceIds|core|coreId|device|deviceId',
   lat:-23.550520, lng:-46.633308,
@@ -543,9 +543,21 @@ async function fetchT(url, opts, ms=10000){
   try{ return await fetch(url, {...opts, signal:ctl.signal}); } finally { clearTimeout(t); }
 }
 function bridgeBase(){ return (state.cfg.bridgeUrl||DEFAULTS.bridgeUrl).replace(/\/+$/,''); }
-function apiFetch(url, opts, ms){
-  if (state.cfg.useBridgeApi===false) return fetchT(url, opts, ms);
+function viaBridge(url, opts, ms){
   return fetchT(bridgeBase()+'/api', {...opts, headers:{...(opts.headers||{}), 'X-Upstream-Url':url}}, ms||20000);
+}
+async function apiFetch(url, opts, ms){
+  if (state.cfg.useBridgeApi===true) return viaBridge(url, opts, ms);
+  // modo direto com fallback automático para a ponte em caso de CORS/rede
+  try{
+    return await fetchT(url, opts, ms);
+  } catch(e){
+    if (e instanceof TypeError || e.name==='AbortError'){
+      // tenta silenciosamente via ponte se ela estiver rodando
+      try{ return await viaBridge(url, opts, 4000); } catch(_){}
+    }
+    throw e;
+  }
 }
 function netErr(e){ return e.name==='AbortError' ? 'Tempo esgotado' : (e instanceof TypeError ? 'Falha de rede ou CORS' : e.message); }
 
@@ -964,7 +976,7 @@ function configView(){
           ${inp('cBridge','Ponte local do Botão de Pânico (TCP)', c.bridgeUrl, 'url')}
           <div class="actions"><button class="btn outline-purple" type="button" id="bridgeTest">Testar ponte</button><span class="msg" id="bridgeMsg" role="status"></span></div>
         </div>
-        <label class="radio" style="min-width:0"><input type="checkbox" id="cUseBridge"${c.useBridgeApi!==false?' checked':''}><div><strong>Consultar a API pela ponte local</strong><span>Evita o bloqueio de CORS do navegador. Desmarque só se a API liberar CORS para esta página.</span></div></label>
+        <label class="radio" style="min-width:0"><input type="checkbox" id="cUseBridge"${c.useBridgeApi===true?' checked':''}><div><strong>Consultar a API sempre pela ponte local</strong><span>Ative se a API bloquear CORS. Quando desativado, o app tenta chamada direta e usa a ponte automaticamente como fallback.</span></div></label>
         <div class="field"><label for="cAuth">Como o token e o secret são enviados</label><select id="cAuth">
           <option value="headers"${c.authMode==='headers'?' selected':''}>Integração Smart Suite (Bearer + X-Integration-Secret)</option>
           <option value="oauth"${c.authMode==='oauth'?' selected':''}>OAuth client credentials (troca por access token)</option></select></div>
@@ -1059,16 +1071,14 @@ async function probe(label, path, devSpec){
   try{ headers = {'Accept':'application/json', ...(await authHeaders())}; }
   catch(e){ tlog('err', `${label}: autenticação não disponível – ${e.message}.`); return null; }
   const t0 = performance.now();
-  tlog('info', `${label}: GET ${url}${state.cfg.useBridgeApi!==false?' (via ponte local)':' (direto do navegador)'}`);
+  tlog('info', `${label}: GET ${url}${state.cfg.useBridgeApi===true?' (via ponte local)':' (direto do navegador, ponte como fallback)'}`);
   let r;
   try{ r = await apiFetch(url, {method:'GET', headers}); }
   catch(e){
     const ms = Math.round(performance.now()-t0);
     if (e.name==='AbortError') tlog('err', `${label}: sem resposta em 10 s.`);
-    else if (state.cfg.useBridgeApi!==false) tlog('err', `${label}: a ponte local não respondeu (${ms} ms).`,
-      `A consulta passa pela ponte em ${bridgeBase()}.\nNa pasta da ponte, execute:\n  python3 ponte_smart_safety.py\nDeixe a janela aberta. Se o Chrome pedir permissão de acesso à rede local, clique em Permitir. Depois teste de novo.`);
-    else tlog('err', `${label}: a requisição não chegou ao servidor ou foi bloqueada pelo navegador (${ms} ms).`,
-      'Causas mais comuns:\n- CORS: o servidor não libera a origem "null" (arquivo aberto localmente).\n- Endpoint incorreto ou fora do ar.\n- Rede corporativa/VPN bloqueando o domínio.\nAbra o DevTools (F12) > Console para ver a mensagem exata do navegador.');
+    else tlog('err', `${label}: sem resposta do servidor ou bloqueio de rede/CORS (${ms} ms).`,
+      'Causas prováveis:\n- API fora do ar ou endpoint incorreto.\n- Rede corporativa/VPN bloqueando o domínio.\n- CORS: a API não libera o acesso a partir desta origem.\n  → Solução: execute ponte_smart_safety.py localmente e ative "Consultar via ponte" nas configurações.\nAbra DevTools (F12) > Console para ver o erro exato do navegador.');
     return null;
   }
   const ms = Math.round(performance.now()-t0);
@@ -1118,7 +1128,7 @@ async function testApi(){
   const c=state.cfg; const rec=credRecord();
   tlog('info','Início do teste.', {url_base:c.apiBase||'(vazia)', rota_colaboradores:c.workersPath, rota_ambientes:c.placesPath,
     autenticacao: c.authMode==='oauth' ? `OAuth client credentials (${c.tokenUrl||'URL de token vazia'})` : `${c.tokenHeader||'—'}: ${(c.tokenPrefix||'').trim()?(c.tokenPrefix.trim()+' '):''}<token> e ${c.secretHeader||'—'}: <secret>`,
-    credenciais: rec ? `cadastradas em ${fmtDate(rec.updatedAt)}` : 'não cadastradas', consulta: state.cfg.useBridgeApi!==false ? `via ponte local (${bridgeBase()})` : 'direto do navegador', modo: state.mode==='live'?'envio real':'simulação'});
+    credenciais: rec ? `cadastradas em ${fmtDate(rec.updatedAt)}` : 'não cadastradas', consulta: state.cfg.useBridgeApi===true ? `via ponte local (${bridgeBase()})` : `direto do navegador (ponte ${bridgeBase()} como fallback)`, modo: state.mode==='live'?'envio real':'simulação'});
   if (!c.apiBase){ tlog('err','URL base vazia.'); m.textContent='Falhou: URL base vazia.'; m.className='msg err'; return; }
   if (!rec){ tlog('err','Nenhuma credencial cadastrada.'); m.textContent='Falhou: cadastre token e secret.'; m.className='msg err'; return; }
   if (!state.creds) tlog('info','Credenciais bloqueadas: aguardando PIN.');
