@@ -1,0 +1,4 @@
+# Configuração real da ponte (host TCP de produção) nunca vai para o repositório
+ponte/ponte.config.json
+__pycache__/
+.DS_Store

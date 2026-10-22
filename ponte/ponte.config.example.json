@@ -1,0 +1,6 @@
+{
+  "tcp_host": "DEFINIR_HOST_TCP_DA_PLATAFORMA",
+  "tcp_port": 0,
+  "bridge_port": 8765,
+  "allowed_origins": ["null", "https://a4solutions.github.io"]
+}
