@@ -1212,7 +1212,7 @@ function setTheme(t, persist){
 $('#themeBtn').addEventListener('click', ()=>setTheme(currentTheme()==='dark'?'light':'dark', true));
 
 /* ================= Eventos de UI ================= */
-document.addEventListener('click', e=>{
+document.addEventListener('click', async e=>{
   const t = e.target.closest('button, tr.row'); if(!t) return;
   if (t.dataset.feature){ location.hash='#/feature/'+t.dataset.feature; return; }
   if (t.dataset.fire){ fire(t.dataset.fire); return; }
