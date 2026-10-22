@@ -1305,7 +1305,7 @@ window.addEventListener('beforeunload', e=>{ if(Object.keys(state.timers).length
 // Só o hash PBKDF2 da senha fica no arquivo, nunca a senha.
 const GATE = {salt:'YE1hfL71wOwFB5TclqXEdw==', hash:'tvp4DbQ4j3kCnMdJpkYGereyhtc+G1OmvrTfi/EbJPs=', iter:250000};
 // Credenciais da equipe: blob gerado pelo admin e embutido aqui. null = não configurado.
-let EMBEDDED_CREDS = null; // {"v":2,"salt":"...","iv":"...","ct":"..."}
+let EMBEDDED_CREDS = {"v":2,"iv":"GyC1+XcZgEbqyIbu","ct":"7uKn31xjcnTzZtbpz0Elq22jvqq+Ea6GcxF89j2co1qcuZ09ClmacsJyiRjl+23rT++wpSfbtBU5dc9DUQZq25kmyxnUIu55m7jtyQO/vqLJSkEUvBKw5yaY+nLrW634wnRy/Nfxt5JdmsYkxmIlgzWQsC7DUDtpJOsjMPmyYR7/WDlaL7Vlxah19gyI6P67a21oc8iSoTuUe2g="};
 const GATE_KEY = 'a4s-demo-gen-session';
 let gateFails = 0, gateLockUntil = 0, started = false;
 async function deriveSessionKey(pwd){
