@@ -462,7 +462,7 @@ function loadCfg(){
   if (/^x-api-key$/i.test(state.cfg.tokenHeader||'')){ state.cfg.tokenHeader=DEFAULTS.tokenHeader; state.cfg.tokenPrefix=DEFAULTS.tokenPrefix; }
   if (/^x-api-secret$/i.test(state.cfg.secretHeader||'')) state.cfg.secretHeader=DEFAULTS.secretHeader;
   if (state.cfg.tokenPrefix==null) state.cfg.tokenPrefix = /^authorization$/i.test(state.cfg.tokenHeader||'') ? DEFAULTS.tokenPrefix : '';
-  if (state.cfg.useBridgeApi==null) state.cfg.useBridgeApi = true;
+  if (state.cfg.useBridgeApi==null) state.cfg.useBridgeApi = false;
   parseLists();
 }
 function saveCfg(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(state.cfg)); return true; }catch(e){ return false; } }
@@ -939,13 +939,17 @@ function configView(){
     <div class="cfg-grid">
       <section class="panel cfg-section">
         <h2>API da plataforma</h2>
-        <p class="hint">O endpoint é salvo neste dispositivo. As credenciais ficam embutidas no app e são desbloqueadas automaticamente pela senha de acesso.</p>
+        <p class="hint">Endpoint e credenciais são salvos neste dispositivo. Se as credenciais embutidas não funcionarem, preencha Token e Secret manualmente.</p>
         <div id="credStatus">${credStatusHtml()}</div>
         ${inp('cApiBase','Endpoint', c.apiBase, 'url', 'https://…')}
+        <div class="fields" style="margin-top:12px">
+          <div class="field"><label for="cToken">Token de integração</label><input id="cToken" type="password" autocomplete="off" spellcheck="false" placeholder="${has ? '(credencial embutida ativa)' : 'Cole o token aqui'}"></div>
+          <div class="field"><label for="cSecret">Secret de integração</label><input id="cSecret" type="password" autocomplete="off" spellcheck="false" placeholder="${has ? '(credencial embutida ativa)' : 'Cole o secret aqui'}"></div>
+        </div>
         <div class="cfg-foot">
           <span class="msg" id="apiMsg" role="status"></span>
-          <button class="btn outline-purple" type="button" id="apiTest"${state.creds&&c.apiBase?'':' disabled'}>Testar conexão</button>
-          <button class="btn primary" type="button" id="apiSave">Salvar endpoint</button>
+          <button class="btn outline-purple" type="button" id="apiTest"${(state.creds||($('#cToken')&&$('#cToken').value))&&c.apiBase?'':' disabled'}>Testar conexão</button>
+          <button class="btn primary" type="button" id="apiSave">Salvar</button>
         </div>
       </section>
 
@@ -1044,8 +1048,14 @@ async function saveApiFromForm(){
   const endpointChanged = endpoint !== state.cfg.apiBase;
   state.cfg.apiBase = endpoint; saveCfg();
   if (endpointChanged) resetPanicData();
+  // salvar credenciais manuais se preenchidas
+  const tok = ($('#cToken')||{}).value||''; const sec = ($('#cSecret')||{}).value||'';
+  if (tok){
+    const rec = {v:1, nopin:true, plain:btoa(unescape(encodeURIComponent(JSON.stringify({token:tok,secret:sec})))), updatedAt:new Date().toISOString()};
+    try{ localStorage.setItem(CRED_KEY, JSON.stringify(rec)); state.creds={token:tok,secret:sec}; }catch(e){}
+  }
   route();
-  const m=$('#apiMsg'); m.textContent='Endpoint salvo.'; m.className='msg ok';
+  const m=$('#apiMsg'); m.textContent=tok?'Endpoint e credenciais salvos.':'Endpoint salvo.'; m.className='msg ok';
 }
 /* ---------- Log do teste de conexão ---------- */
 const LVL = {info:['info','Info'], ok:['ok','OK'], warn:['sim','Atenção'], err:['err','Erro']};
