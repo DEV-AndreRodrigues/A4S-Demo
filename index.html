@@ -944,7 +944,7 @@ function renderPanicLists(){
   else if (P.wErr && !P.workers) wl.innerHTML = listState(`Não foi possível carregar: ${P.wErr}.`, true, true);
   else if (P.workers){
     wl.innerHTML = !P.workers.length ? listState('Nenhum colaborador ativo no tenant.')
-      : P.workers.map(w=>`<label class="item"><input type="checkbox" data-w="${esc(w.id)}"${P.sel.has(w.id)?' checked':''}><span class="nm">${esc(w.nome)}</span></label>`).join('');
+      : P.workers.map(w=>`<label class="item"><input type="checkbox" data-w="${esc(w.id)}"${P.sel.has(w.id)?' checked':''}><div><div class="nm">${esc(w.nome)}</div>${w.tag?`<div class="sub-txt">TAG ${esc(w.tag.toUpperCase())}</div>`:''}</div></label>`).join('');
   } else wl.innerHTML = listState('Clique em “Atualizar lista” para carregar.');
   // Ambientes
   if (!ready && !P.places) pl.innerHTML = listState('Configure os endpoints e as credenciais da API para carregar os ambientes.', false, true);
