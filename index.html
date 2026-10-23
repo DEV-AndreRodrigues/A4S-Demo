@@ -615,11 +615,12 @@ async function apiList(path){
   }
   return all;
 }
+function norm(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim(); }
 function findManualWorker(nome, mat){
-  const nl = nome.toLowerCase(); const ml = (mat||'').toLowerCase();
+  const nl = norm(nome); const ml = norm(mat);
   return state.workers.find(m=>{
-    if (ml && m.mat && m.mat.toLowerCase()===ml) return true;
-    const mn = m.nome.toLowerCase();
+    if (ml && m.mat && norm(m.mat)===ml) return true;
+    const mn = norm(m.nome);
     return mn===nl || nl.includes(mn) || mn.includes(nl);
   });
 }
