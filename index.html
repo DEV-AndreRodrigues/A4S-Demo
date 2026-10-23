@@ -731,8 +731,12 @@ const hex8 = n => (n>>>0).toString(16).toUpperCase().padStart(8,'0');
 function tagPart(tag){ const t = String(tag||'').trim().toUpperCase(); return /^[0-9A-F]{6}$/.test(t) ? '00'+t : null; }
 function utcNoMs(){ return new Date().toISOString().replace(/\.\d{3}Z$/,'Z'); }
 function buildPanicFrame(w, pl){
-  const tp = tagPart(w.tag);
-  if (!tp) throw new Error(`TAG "${w.tag}" não tem 6 dígitos`);
+  let tp = tagPart(w.tag);
+  if (!tp){
+    if (state.mode !== 'sim') throw new Error(`TAG "${w.tag}" não tem 6 dígitos`);
+    const h = [...String(w.id)].reduce((a,c)=>((a<<5)-a+c.charCodeAt(0))|0, 0);
+    tp = '00' + (Math.abs(h) % 0xFFFFFF).toString(16).toUpperCase().padStart(6,'0');
+  }
   if (!pl.core) throw new Error('Ambiente sem CORE associado');
   const dist = 3 + Math.floor(Math.random()*18); // 3 a 20 m
   return {frame:{type:12, id:String(pl.core), code:100, data:tp+hex8(dist), date:utcNoMs(), messageId:uuid()}, dist};
