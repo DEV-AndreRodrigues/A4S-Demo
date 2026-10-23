@@ -622,8 +622,9 @@ async function loadPanicWorkers(){
     P.workers = raw.map(o=>{
       const tag = devId(pickField(o, state.cfg.wDev));
       const nome = String(pickField(o, state.cfg.wNome) ?? '');
-      return {id:String(pickField(o, state.cfg.wId) ?? nome), nome, mat:String(pickField(o, state.cfg.wMat) ?? ''), tag};
-    }).filter(w=>w.tag && w.nome).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+      const active = pickField(o, 'active|status');
+      return {id:String(pickField(o, state.cfg.wId) ?? nome), nome, mat:String(pickField(o, state.cfg.wMat) ?? ''), tag, active};
+    }).filter(w=>w.nome && (w.active !== false)).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
     const ids = new Set(P.workers.map(w=>w.id));
     P.sel = new Set([...P.sel].filter(id=>ids.has(id)));
   }catch(e){ P.wErr = netErr(e); P.workers = P.workers || null; }
@@ -859,7 +860,7 @@ function featureView(fid){
 function panicView(f){
   const s = f.subs[0]; const on = !!state.timers[s.id]; const P = state.panic;
   return `<h1 class="section">${esc(f.nome)}</h1>${crumbs(f)}
-    <p class="lead">Selecione os colaboradores e o ambiente. As listas vêm da plataforma e mostram só quem tem TAG ou CORE associado. Telas que reagem: ${s.telas.map(esc).join(', ')}.</p>
+    <p class="lead">Selecione os colaboradores e o ambiente. As listas vêm da plataforma. Ambientes exibem só os que têm CORE associado. Telas que reagem: ${s.telas.map(esc).join(', ')}.</p>
     <div class="panic-layout">
       <section class="panel pick" aria-labelledby="wTitle">
         <div class="pick-head"><h2 id="wTitle">Colaboradores</h2><span class="count" id="wCount"></span></div>
@@ -896,7 +897,7 @@ function renderPanicLists(){
   else if (P.wLoading) wl.innerHTML = listState('Carregando colaboradores…');
   else if (P.wErr && !P.workers) wl.innerHTML = listState(`Não foi possível carregar: ${P.wErr}.`, true, true);
   else if (P.workers){
-    wl.innerHTML = !P.workers.length ? listState('Nenhum colaborador com dispositivo associado no tenant.')
+    wl.innerHTML = !P.workers.length ? listState('Nenhum colaborador ativo no tenant.')
       : P.workers.map(w=>`<label class="item"><input type="checkbox" data-w="${esc(w.id)}"${P.sel.has(w.id)?' checked':''}><span class="nm">${esc(w.nome)}</span></label>`).join('');
   } else wl.innerHTML = listState('Clique em “Atualizar lista” para carregar.');
   // Ambientes
