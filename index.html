@@ -632,15 +632,27 @@ async function loadPanicWorkers(){
 }
 async function fetchDeviceUidMap(){
   try{
-    const url = apiUrl('/platform/devices?page=1&limit=500');
-    if (!url) return {};
+    const base = apiUrl('/platform/devices');
+    if (!base) return {};
     const headers = {'Accept':'application/json', ...(await authHeaders())};
-    const r = await apiFetch(url, {method:'GET', headers});
-    if (!r.ok) return {};
-    const j = await r.json();
-    const devs = (j?.data?.devices) || (j?.data?.items) || (j?.data?.results) || (Array.isArray(j?.data) ? j.data : []);
     const map = {};
-    devs.forEach(d=>{ if(d.id && d.uid) map[d.id]=d.uid.toUpperCase(); });
+    let page = 1;
+    for (let i=0; i<50; i++){
+      const url = base + `?page=${page}&limit=100`;
+      const r = await apiFetch(url, {method:'GET', headers});
+      if (!r.ok) break;
+      const j = await r.json();
+      const devs = (j?.data?.devices) || (j?.data?.items) || (j?.data?.results) || (Array.isArray(j?.data) ? j.data : []);
+      if (!devs.length) break;
+      devs.forEach(d=>{ if(d.id && d.uid) map[d.id]=d.uid.toUpperCase(); });
+      const meta = j?.meta ?? j?.pagination ?? j?.data?.meta ?? {};
+      const total = meta.total ?? meta.totalItems ?? meta.count;
+      const hasNext = meta.hasNext ?? meta.hasNextPage ?? false;
+      if (!hasNext && total == null) break;
+      if (total != null && page*100 >= total) break;
+      if (!hasNext && total == null) break;
+      page++;
+    }
     return map;
   }catch(e){ return {}; }
 }
