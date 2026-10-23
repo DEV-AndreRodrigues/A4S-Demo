@@ -631,11 +631,12 @@ async function loadPanicWorkers(){
   P.wLoading=false; renderPanicLists();
 }
 async function fetchDeviceUidMap(){
-  const LIMIT = 100; const MAX_PAGES = 20; const PAGE_TIMEOUT = 8000;
-  async function fetchPage(url, headers){
+  const LIMIT = 100; const MAX_PAGES = 20;
+  async function fetchDevPage(apiPath, headers){
+    // sempre via ponte para evitar CORS + double-fetch lento
     return Promise.race([
-      apiFetch(url, {method:'GET', headers}),
-      new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), PAGE_TIMEOUT))
+      viaBridge(apiUrl(apiPath), {method:'GET', headers}),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), 10000))
     ]);
   }
   try{
@@ -647,7 +648,7 @@ async function fetchDeviceUidMap(){
     for (let i=0; i<MAX_PAGES; i++){
       let r, j, devs;
       try{
-        r = await fetchPage(base + `?page=${page}&limit=${LIMIT}`, headers);
+        r = await fetchDevPage(`/platform/devices?page=${page}&limit=${LIMIT}`, headers);
         if (!r.ok) break;
         j = await r.json();
         devs = (j?.data?.devices) || (j?.data?.items) || (j?.data?.results) || (Array.isArray(j?.data) ? j.data : []);
@@ -829,8 +830,10 @@ function renderConsole(){
   const body = $('#logBody'); if(!body) return;
   if (!state.log.length){ body.innerHTML = '<tr><td colspan="4" class="empty">Nenhum evento gerado. Dispare um cenário para começar.</td></tr>'; return; }
   body.innerHTML = state.log.map(e=>{
-    const row = `<tr class="row" data-id="${e.id}" tabindex="0" aria-expanded="${state.openRow===e.id}"><td>${e.time.toLocaleTimeString('pt-BR')}</td><td>${esc(e.f.nome)}${e.f.subs.length>1?' / '+esc(e.s.nome):''}</td><td>${esc(e.summary)}</td><td><span class="st ${e.status}">${esc(e.code)}</span></td></tr>`;
-    const detail = state.openRow===e.id ? `<tr><td colspan="4"><pre class="payload">${esc(typeof e.payload==='string'?e.payload:JSON.stringify(e.payload,null,2))}</pre></td></tr>` : '';
+    const isPanic = e.s && e.s.id==='panico';
+    const open = isPanic || state.openRow===e.id;
+    const row = `<tr class="row" data-id="${e.id}" tabindex="0" aria-expanded="${open}"><td>${e.time.toLocaleTimeString('pt-BR')}</td><td>${esc(e.f.nome)}${e.f.subs.length>1?' / '+esc(e.s.nome):''}</td><td>${esc(e.summary)}</td><td><span class="st ${e.status}">${esc(e.code)}</span></td></tr>`;
+    const detail = (open && e.payload!=null) ? `<tr><td colspan="4"><pre class="payload">${esc(typeof e.payload==='string'?e.payload:JSON.stringify(e.payload,null,2))}</pre></td></tr>` : '';
     return row+detail;
   }).join('');
 }
@@ -944,7 +947,11 @@ function renderPanicLists(){
   else if (P.wErr && !P.workers) wl.innerHTML = listState(`Não foi possível carregar: ${P.wErr}.`, true, true);
   else if (P.workers){
     wl.innerHTML = !P.workers.length ? listState('Nenhum colaborador ativo no tenant.')
-      : P.workers.map(w=>`<label class="item"><input type="checkbox" data-w="${esc(w.id)}"${P.sel.has(w.id)?' checked':''}><div><div class="nm">${esc(w.nome)}</div>${w.tag?`<div class="sub-txt">TAG ${esc(w.tag.toUpperCase())}</div>`:''}</div></label>`).join('');
+      : P.workers.map(w=>{
+          let tag = w.tag ? w.tag.toUpperCase() : '';
+          if (!tag){ const m=state.workers.find(x=>(x.mat&&x.mat===w.mat)||x.nome.toLowerCase()===w.nome.toLowerCase()); if(m&&m.tag) tag=m.tag.toUpperCase(); }
+          return `<label class="item"><input type="checkbox" data-w="${esc(w.id)}"${P.sel.has(w.id)?' checked':''}><div><div class="nm">${esc(w.nome)}</div>${tag?`<div class="sub-txt">TAG ${esc(tag)}</div>`:''}</div></label>`;
+        }).join('');
   } else wl.innerHTML = listState('Clique em “Atualizar lista” para carregar.');
   // Ambientes
   if (!ready && !P.places) pl.innerHTML = listState('Configure os endpoints e as credenciais da API para carregar os ambientes.', false, true);
