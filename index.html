@@ -63,6 +63,14 @@ main{flex:1;width:100%;max-width:1240px;margin:0 auto;padding:40px 24px 32px}
 h1{color:var(--teal);font-size:clamp(28px,4vw,44px);font-weight:700;margin:0 0 6px;line-height:1.15}
 h1.section{font-size:clamp(26px,3vw,36px);font-weight:500;text-transform:uppercase;letter-spacing:.3px}
 h2.sub-section{font-size:clamp(18px,2.2vw,24px);font-weight:500;color:var(--teal);margin:32px 0 8px;border-bottom:1px solid var(--line);padding-bottom:8px}
+.zm-tabs{display:flex;gap:8px;margin-bottom:4px;flex-wrap:wrap}
+.zm-tab{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:8px 18px;font-size:14px;font-weight:500;cursor:pointer;color:var(--muted);transition:all .15s}
+.zm-tab.active,.zm-tab:hover{background:var(--purple-soft);color:var(--purple);border-color:var(--purple)}
+.zm-dir-toggle{display:flex;gap:0;border:1px solid var(--line);border-radius:6px;overflow:hidden;flex:none}
+.zm-dir{display:flex;align-items:center;gap:6px;padding:8px 18px;font-size:14px;font-weight:500;cursor:pointer;background:var(--surface-2);color:var(--muted);transition:all .15s}
+.zm-dir input[type=radio]{display:none}
+.zm-dir.active{background:var(--purple-soft);color:var(--purple);font-weight:600}
+.zm-dir:first-child{border-right:1px solid var(--line)}
 .lead{color:var(--muted);margin:0 0 28px;max-width:70ch}
 .crumbs{color:var(--muted);font-size:15px;margin:0 0 28px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .crumbs a{color:var(--muted);text-decoration:none} .crumbs a:hover{text-decoration:underline}
@@ -417,7 +425,8 @@ const state = {
   sent:0, failed:0, log:[], openRow:null,
   creds:null, oauth:null, testLog:[], testOpen:null,
   panic:{workers:null, places:null, wLoading:false, pLoading:false, wErr:'', pErr:'', sel:new Set(), place:null, q:'', acion:'Botão'},
-  sd:{workers:null, wLoading:false, wErr:'', sel:new Set(), equipIdx:null}
+  sd:{workers:null, wLoading:false, wErr:'', sel:new Set(), equipIdx:null},
+  zm:{workers:null, places:null, wLoading:false, pLoading:false, wErr:'', pErr:'', sel:new Set(), place:null, dir:'entry', activeSub:'safe-zone'}
 };
 
 /* ================= Utilitários ================= */
@@ -782,6 +791,7 @@ async function send(f, s, ctx, summary){
 function fire(subId){
   if (subId==='panico') return firePanic();
   if (subId==='homem-maquina') return fireSd();
+  if (['safe-zone','red-zone','people-tracking'].includes(subId)){ state.zm.activeSub=subId; return fireZm(); }
   const hit = findSub(subId); if(!hit) return;
   const {f,s} = hit;
   if (s.campos.includes('colaborador') && !state.workers.length){ toast('Cadastre ao menos um colaborador na configuração.'); return; }
@@ -912,6 +922,7 @@ function featureView(fid){
   const f = FEATURES.find(x=>x.id===fid); if(!f) return homeView();
   if (f.id==='botao-panico') return panicView(f);
   if (f.id==='safe-distance') return sdView(f);
+  if (f.id==='zone-map') return zmView(f);
   const cards = f.subs.map(s=>{
     const on = !!state.timers[s.id];
     return `<article class="panel sub">
@@ -1120,6 +1131,159 @@ function sdView(f){
     ${consoleBlock()}`;
 }
 
+/* ================= Zone Map ================= */
+async function loadZmWorkers(){
+  const Z = state.zm; Z.wLoading=true; Z.wErr=''; renderZmLists();
+  try{
+    const raw = await apiList(state.cfg.workersPath);
+    Z.workers = raw.map(o=>{
+      let tag = devId(pickField(o, state.cfg.wDev));
+      const nome = String(pickField(o, state.cfg.wNome) ?? '');
+      const mat = String(pickField(o, state.cfg.wMat) ?? '');
+      const active = pickField(o, 'active|status');
+      if (!tag){ const m = findManualWorker(nome, mat); if(m&&m.tag) tag=m.tag; }
+      return {id:String(pickField(o, state.cfg.wId) ?? nome), nome, mat, tag, active};
+    }).filter(w=>w.nome && (w.active !== false)).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+    Z.sel = new Set([...Z.sel].filter(id=>Z.workers.some(w=>w.id===id)));
+  }catch(e){ Z.wErr = netErr(e); }
+  Z.wLoading=false; renderZmLists();
+}
+async function loadZmPlaces(){
+  const Z = state.zm; Z.pLoading=true; Z.pErr=''; renderZmLists();
+  let raw;
+  try{
+    raw = await apiList(state.cfg.placesPath);
+    Z.places = buildPlaces(raw, {});
+    if (Z.place && !Z.places.some(p=>p.id===Z.place)) Z.place = null;
+  }catch(e){ Z.pErr = netErr(e); Z.pLoading=false; renderZmLists(); return; }
+  Z.pLoading=false; renderZmLists();
+  fetchDeviceUidMap().then(devMap=>{
+    if (!Object.keys(devMap).length) return;
+    Z.places = buildPlaces(raw, devMap);
+    if (Z.place && !Z.places.some(p=>p.id===Z.place)) Z.place = null;
+    renderZmLists();
+  }).catch(()=>{});
+}
+function renderZmLists(){
+  const wl = $('#zmwList'); if(!wl) return;
+  const Z = state.zm; const pl = $('#zmpList');
+  const ready = apiReady();
+  // Colaboradores
+  if (!ready && !Z.workers) wl.innerHTML = listState('Configure os endpoints e as credenciais da API para carregar os colaboradores.', false, true);
+  else if (Z.wLoading) wl.innerHTML = listState('Carregando colaboradores…');
+  else if (Z.wErr && !Z.workers) wl.innerHTML = listState(`Não foi possível carregar: ${Z.wErr}.`, true, true);
+  else if (Z.workers){
+    wl.innerHTML = !Z.workers.length ? listState('Nenhum colaborador ativo no tenant.')
+      : Z.workers.map(w=>{
+          const tag = w.tag ? w.tag.toUpperCase() : '';
+          return `<label class="item"><input type="checkbox" data-zw="${esc(w.id)}"${Z.sel.has(w.id)?' checked':''}><div><div class="nm">${esc(w.nome)}</div>${tag?`<div class="sub-txt">TAG ${esc(tag)}</div>`:''}</div></label>`;
+        }).join('');
+  } else wl.innerHTML = listState('Clique em "Atualizar lista" para carregar.');
+  // Ambientes
+  if (!ready && !Z.places) pl.innerHTML = listState('Configure os endpoints e as credenciais da API para carregar os ambientes.', false, true);
+  else if (Z.pLoading) pl.innerHTML = listState('Carregando ambientes…');
+  else if (Z.pErr && !Z.places) pl.innerHTML = listState(`Não foi possível carregar: ${Z.pErr}.`, true, true);
+  else if (Z.places){
+    pl.innerHTML = !Z.places.length ? listState('Nenhum ambiente com CORE associado no tenant.')
+      : Z.places.map(p=>`<label class="item"><input type="radio" name="zmplace" data-zp="${esc(p.id)}"${Z.place===p.id?' checked':''}><div><div class="nm">${esc(p.nome)}</div><div class="sub-txt">${esc(p.core)}</div></div></label>`).join('');
+  } else pl.innerHTML = listState('Clique em "Atualizar lista" para carregar.');
+  // Contadores e resumo
+  const nSel = Z.sel.size;
+  const wc = $('#zmwCount'); if(wc) wc.textContent = Z.workers ? `${nSel} de ${Z.workers.length} selecionados` : '';
+  const pc = $('#zmpCount'); if(pc) pc.textContent = Z.places ? `${Z.places.length} com dispositivo` : '';
+  const place = (Z.places||[]).find(p=>p.id===Z.place);
+  const dirLabel = Z.dir==='entry' ? 'Entrada' : 'Saída';
+  const sum = $('#zmSummary');
+  if(sum) sum.innerHTML = nSel && place
+    ? `<strong>${dirLabel}</strong> de <strong>${nSel} colaborador${nSel>1?'es':''}</strong> em <strong>${esc(place.nome)}</strong>.`
+    : nSel ? 'Escolha o ambiente.' : 'Selecione ao menos um colaborador.';
+  const fb = $('#zmFire'); if(fb){ fb.textContent = nSel>1 ? `Gerar ${nSel} eventos` : 'Gerar evento'; fb.disabled = !(nSel && place); }
+  ['zmwReload','zmpReload'].forEach(id=>{ const b=$('#'+id); if(b) b.disabled = !ready || Z.wLoading || Z.pLoading; });
+  if (Z.wErr && Z.workers) toast(`Colaboradores: ${Z.wErr}`);
+  if (Z.pErr && Z.places) toast(`Ambientes: ${Z.pErr}`);
+}
+async function fireZm(){
+  const Z = state.zm;
+  const place = (Z.places||[]).find(p=>p.id===Z.place);
+  if (!place) return;
+  const subId = Z.activeSub;
+  const hit = findSub(subId); if(!hit) return;
+  const {f, s} = hit;
+  const workers = (Z.workers||[]).filter(w=>Z.sel.has(w.id));
+  if (!workers.length) return;
+  for (const w of workers){
+    const payload = {
+      type: s.evento,
+      direction: Z.dir,
+      worker: {id:w.id, nome:w.nome, tag:w.tag||null},
+      place: {id:place.id, nome:place.nome, core:place.core},
+      timestamp: new Date().toISOString(),
+      messageId: uuid()
+    };
+    const dirLabel = Z.dir==='entry' ? 'Entrada' : 'Saída';
+    const summary = `${dirLabel} – ${w.nome} – ${place.nome}`;
+    if (state.mode==='sim'){
+      state.sent++;
+      addLog({f, s, summary, status:'sim', code:'Simulado', payload});
+    } else {
+      const url = apiUrl(state.cfg.ingestPath);
+      if (!url){ state.failed++; addLog({f, s, summary, status:'err', code:'Sem endpoint', payload}); }
+      else {
+        try{
+          const headers = {'Content-Type':'application/json', ...(await authHeaders())};
+          const res = await fetchT(url, {method:'POST', headers, body:JSON.stringify(payload)}, 8000);
+          res.ok ? state.sent++ : state.failed++;
+          addLog({f, s, summary, status:res.ok?'ok':'err', code:`HTTP ${res.status}`, payload});
+        }catch(err){
+          state.failed++;
+          addLog({f, s, summary, status:'err', code:netErr(err), payload:{erro:err.message, colaborador:{nome:w.nome}, ambiente:{nome:place.nome}}});
+        }
+      }
+    }
+  }
+  refreshStats();
+}
+function zmSubPicker(f){
+  const Z = state.zm;
+  return `<div class="zm-tabs">${f.subs.map(s=>`<button class="zm-tab${Z.activeSub===s.id?' active':''}" type="button" data-zmtab="${s.id}">${esc(s.nome)}</button>`).join('')}</div>`;
+}
+function zmView(f){
+  const Z = state.zm;
+  const sub = f.subs.find(s=>s.id===Z.activeSub) || f.subs[0];
+  const on = !!state.timers[sub.id];
+  return `<h1 class="section">${esc(f.nome)}</h1>${crumbs(f)}
+    <p class="lead">${esc(f.desc)}</p>
+    ${zmSubPicker(f)}
+    <p class="lead" style="margin-top:16px">${esc(sub.desc)}</p>
+    <div class="panic-layout">
+      <section class="panel pick" aria-labelledby="zmwTitle">
+        <div class="pick-head"><h2 id="zmwTitle">Colaboradores</h2><span class="count" id="zmwCount"></span></div>
+        <div class="pick-tools">
+          <button class="link-btn" type="button" id="zmwAll">Selecionar todos</button>
+          <button class="link-btn" type="button" id="zmwNone">Limpar seleção</button>
+          <button class="link-btn" type="button" id="zmwReload" style="margin-left:auto">Atualizar lista</button>
+        </div>
+        <div class="list" id="zmwList" role="group" aria-label="Colaboradores"></div>
+      </section>
+      <section class="panel pick" aria-labelledby="zmpTitle">
+        <div class="pick-head"><h2 id="zmpTitle">Ambiente</h2><span class="count" id="zmpCount"></span></div>
+        <div class="pick-tools"><span class="count">Um ambiente por evento</span><button class="link-btn" type="button" id="zmpReload" style="margin-left:auto">Atualizar lista</button></div>
+        <div class="list" id="zmpList" role="radiogroup" aria-label="Ambientes"></div>
+      </section>
+    </div>
+    <div class="panel panic-bar">
+      <div class="zm-dir-toggle">
+        <label class="zm-dir${Z.dir==='entry'?' active':''}"><input type="radio" name="zmdir" value="entry"${Z.dir==='entry'?' checked':''}> Entrada</label>
+        <label class="zm-dir${Z.dir==='exit'?' active':''}"><input type="radio" name="zmdir" value="exit"${Z.dir==='exit'?' checked':''}> Saída</label>
+      </div>
+      <div class="summary" id="zmSummary"></div>
+      <span class="badge ${on?'on':'off'}">${on?'Automático ativo':'Parado'}</span>
+      <button class="btn primary" type="button" id="zmFire">Gerar evento</button>
+      ${autoControls(sub.id)}
+    </div>
+    ${consoleBlock()}`;
+}
+
 /* ---------- Página de configuração ---------- */
 function inp(id, label, val, type='text', ph=''){
   return `<div class="field"><label for="${id}">${label}</label><input id="${id}" type="${type}" value="${esc(val)}" placeholder="${esc(ph)}" autocomplete="off" spellcheck="false"></div>`;
@@ -1239,7 +1403,7 @@ function configView(){
       </details>
     </div>`;
 }
-function resetPanicData(){ state.oauth=null; Object.assign(state.panic,{workers:null, places:null, sel:new Set(), place:null, wErr:'', pErr:''}); }
+function resetPanicData(){ state.oauth=null; Object.assign(state.panic,{workers:null, places:null, sel:new Set(), place:null, wErr:'', pErr:''}); Object.assign(state.sd,{workers:null, sel:new Set(), equipIdx:null, wErr:''}); Object.assign(state.zm,{workers:null, places:null, sel:new Set(), place:null, wErr:'', pErr:''}); }
 async function saveApiFromForm(){
   const msg = $('#apiMsg'); const set=(t,ok)=>{ msg.textContent=t; msg.className='msg '+(ok?'ok':'err'); };
   const endpoint=$('#cApiBase').value.trim();
@@ -1398,6 +1562,12 @@ function route(){
     const S = state.sd;
     if (apiReady() && !S.workers && !S.wLoading && !S.wErr) loadSdWorkers();
   }
+  if (m && m[1]==='zone-map'){
+    renderZmLists();
+    const Z = state.zm;
+    if (apiReady() && !Z.workers && !Z.wLoading && !Z.wErr) loadZmWorkers();
+    if (apiReady() && !Z.places && !Z.pLoading && !Z.pErr) loadZmPlaces();
+  }
 }
 function applyMode(){
   const live = state.mode==='live';
@@ -1433,6 +1603,7 @@ document.addEventListener('click', async e=>{
   if (t.dataset.fire){ fire(t.dataset.fire); return; }
   if (t.dataset.burst){ burst(t.dataset.burst, 10); return; }
   if (t.dataset.auto){ toggleAuto(t.dataset.auto); return; }
+  if (t.dataset.zmtab){ state.zm.activeSub=t.dataset.zmtab; const f=FEATURES.find(x=>x.id==='zone-map'); $('#view').innerHTML=zmView(f); renderConsole(); refreshStats(); renderZmLists(); return; }
   switch(t.id){
     case 'stopAllBtn': stopAll(); return;
     case 'clearLog': state.log=[]; state.sent=0; state.failed=0; renderConsole(); refreshStats(); return;
@@ -1444,6 +1615,11 @@ document.addEventListener('click', async e=>{
     case 'sdwAll': { const S=state.sd; (S.workers||[]).forEach(w=>S.sel.add(w.id)); renderSdLists(); return; }
     case 'sdwNone': state.sd.sel.clear(); renderSdLists(); return;
     case 'sdFire': fireSd(); return;
+    case 'zmwReload': state.zm.wErr=''; loadZmWorkers(); return;
+    case 'zmpReload': state.zm.pErr=''; loadZmPlaces(); return;
+    case 'zmwAll': { const Z=state.zm; (Z.workers||[]).forEach(w=>Z.sel.add(w.id)); renderZmLists(); return; }
+    case 'zmwNone': state.zm.sel.clear(); renderZmLists(); return;
+    case 'zmFire': fireZm(); return;
     case 'apiSave': saveApiFromForm(); return;
     case 'apiTest': testApi(); return;
     case 'testLogClear': state.testLog=[]; state.testOpen=null; renderTestLog(); return;
@@ -1516,6 +1692,9 @@ document.addEventListener('change', e=>{
   if (t.dataset.p!==undefined){ state.panic.place = t.dataset.p; renderPanicLists(); return; }
   if (t.dataset.sw!==undefined){ const S=state.sd; t.checked ? S.sel.add(t.dataset.sw) : S.sel.delete(t.dataset.sw); renderSdLists(); return; }
   if (t.dataset.se!==undefined){ state.sd.equipIdx = +t.dataset.se; renderSdLists(); return; }
+  if (t.dataset.zw!==undefined){ const Z=state.zm; t.checked ? Z.sel.add(t.dataset.zw) : Z.sel.delete(t.dataset.zw); renderZmLists(); return; }
+  if (t.dataset.zp!==undefined){ state.zm.place = t.dataset.zp; renderZmLists(); return; }
+  if (t.name==='zmdir'){ state.zm.dir=t.value; renderZmLists(); return; }
   if (t.name==='mode'){ state.mode = t.value; applyMode(); try{localStorage.setItem('a4s-demo-mode',t.value);}catch(e){} toast(t.value==='live'?'Envio real ativado.':'Modo simulação ativado.'); return; }
   if (t.id==='cAuth'){ $('#authHeadersBox').hidden = t.value==='oauth'; $('#authOauthBox').hidden = t.value!=='oauth'; }
 });
