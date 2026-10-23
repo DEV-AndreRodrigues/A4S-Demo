@@ -56,7 +56,7 @@ RE_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 # Proxy da API: só GET, só domínios a4s.io, só as rotas que a página usa.
 RE_UPSTREAM_HOST = re.compile(os.environ.get("BRIDGE_ALLOWED_HOST_RE", r"^([a-z0-9-]+\.)*a4s\.io$"))
-RE_UPSTREAM_PATH = re.compile(r"^(/api)?/(platform/(employees|places|devices|panic-alerts/codes)|version)(/|$)")
+RE_UPSTREAM_PATH = re.compile(r"^(/api)?/(platform/(employees(/[A-Za-z0-9_-]+)?|places|devices|panic-alerts/codes)|version)(/|$)")
 FORWARD_HEADERS = ("accept", "authorization")
 HOP_BY_HOP = {"x-upstream-url"}
 
