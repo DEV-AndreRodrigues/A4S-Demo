@@ -1067,35 +1067,59 @@ function renderSdLists(){
     const fb = $('#sdFire'); if(fb){ fb.textContent = 'Gerar evento'; fb.disabled = !(eq1 && eq2); }
   }
 }
-async function fireSd(){
+/* Safe Distance: sequência de 3 frames TCP via bridge (verde→amarelo→vermelho) */
+const SD_CODES_HM = [133, 132, 131]; // green → yellow → red, person_machine
+const SD_CODES_MM = [103, 102, 101]; // green → yellow → red, machine_machine
+function buildSdFrameHM(w, equip, code){
+  let tp = tagPart(w.tag);
+  if (!tp){
+    const manual = findManualWorker(w.nome, w.mat);
+    if (manual) tp = tagPart(manual.tag);
+  }
+  if (!tp){
+    if (state.mode !== 'sim') throw new Error(`TAG "${w.nome}" não encontrada. Cadastre nome;matrícula;TAG na configuração manual.`);
+    const h = [...String(w.id)].reduce((a,c)=>((a<<5)-a+c.charCodeAt(0))|0, 0);
+    tp = '00' + (Math.abs(h) % 0xFFFFFF).toString(16).toUpperCase().padStart(6,'0');
+  }
+  if (!equip.core) throw new Error(`Equipamento "${equip.nome}" sem CORE configurado.`);
+  const dist = 1 + Math.floor(Math.random()*8);
+  return {type:12, id:String(equip.core), code, data:tp+hex8(dist), date:utcNoMs(), messageId:uuid()};
+}
+function buildSdFrameMM(eq1, eq2, code){
+  if (!eq1.core) throw new Error(`Equipamento "${eq1.nome}" sem CORE configurado.`);
+  const corePart = '00' + String(eq2.core).toUpperCase().padStart(6,'0').slice(-6);
+  const dist = 1 + Math.floor(Math.random()*8);
+  return {type:12, id:String(eq1.core), code, data:corePart+hex8(dist), date:utcNoMs(), messageId:uuid()};
+}
+function fireSd(){
   const S = state.sd; const equips = state.equip;
   const f = FEATURES.find(x=>x.id==='safe-distance');
   if (S.activeSub === 'homem-maquina'){
     const sub = f.subs[0]; const equip = equips[S.equipIdx]; if(!equip) return;
     const workers = (S.workers||[]).filter(w=>S.sel.has(w.id)); if(!workers.length) return;
-    for (const w of workers){
-      const payload = {type:'safe_distance.person_machine', worker:{id:w.id, nome:w.nome, tag:w.tag||null}, equipment:{nome:equip.nome, core:equip.core}, timestamp:new Date().toISOString(), messageId:uuid()};
-      const summary = `${w.nome} – ${equip.nome}`;
-      await _sdSend(f, sub, summary, payload);
-    }
+    workers.forEach((w, wi) => {
+      SD_CODES_HM.forEach((code, ci) => {
+        setTimeout(() => {
+          const summary = `${w.nome} – ${equip.nome} – código ${code}`;
+          let frame;
+          try{ frame = buildSdFrameHM(w, equip, code); }
+          catch(e){ state.failed++; addLog({f, s:sub, summary:`${w.nome} – ${equip.nome}`, status:'err', code:'Dado inválido', payload:{erro:e.message, colaborador:{nome:w.nome, tag:w.tag||'(não encontrada)'}, equipamento:{nome:equip.nome, core:equip.core}}}); refreshStats(); return; }
+          sendFrame(f, sub, frame, summary);
+        }, wi*3100 + ci*1000);
+      });
+    });
   } else {
     const sub = f.subs[1]; const eq1 = equips[S.equipIdx]; const eq2 = equips[S.equip2Idx]; if(!eq1||!eq2) return;
-    const payload = {type:'safe_distance.machine_machine', equipment1:{nome:eq1.nome, core:eq1.core}, equipment2:{nome:eq2.nome, core:eq2.core}, timestamp:new Date().toISOString(), messageId:uuid()};
-    const summary = `${eq1.nome} – ${eq2.nome}`;
-    await _sdSend(f, sub, summary, payload);
+    SD_CODES_MM.forEach((code, ci) => {
+      setTimeout(() => {
+        const summary = `${eq1.nome} – ${eq2.nome} – código ${code}`;
+        let frame;
+        try{ frame = buildSdFrameMM(eq1, eq2, code); }
+        catch(e){ state.failed++; addLog({f, s:sub, summary:`${eq1.nome} – ${eq2.nome}`, status:'err', code:'Dado inválido', payload:{erro:e.message}}); refreshStats(); return; }
+        sendFrame(f, sub, frame, summary);
+      }, ci*1000);
+    });
   }
-  refreshStats();
-}
-async function _sdSend(f, sub, summary, payload){
-  if (state.mode==='sim'){ state.sent++; addLog({f, s:sub, summary, status:'sim', code:'Simulado', payload}); return; }
-  const url = apiUrl(state.cfg.ingestPath);
-  if (!url){ state.failed++; addLog({f, s:sub, summary, status:'err', code:'Sem endpoint', payload}); return; }
-  try{
-    const headers = {'Content-Type':'application/json', ...(await authHeaders())};
-    const res = await fetchT(url, {method:'POST', headers, body:JSON.stringify(payload)}, 8000);
-    res.ok ? state.sent++ : state.failed++;
-    addLog({f, s:sub, summary, status:res.ok?'ok':'err', code:`HTTP ${res.status}`, payload});
-  }catch(err){ state.failed++; addLog({f, s:sub, summary, status:'err', code:netErr(err), payload:{erro:err.message}}); }
 }
 function sdView(f){
   const S = state.sd; const isHM = S.activeSub==='homem-maquina';
