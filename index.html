@@ -692,8 +692,12 @@ async function fetchDeviceUidMap(){
 function resolveCore(raw){
   if (!raw) return null;
   const s = String(raw).trim().toUpperCase();
-  if (/^[0-9A-F]{6}$/.test(s)) return s;                     // já é UID hardware
-  return state._devMap[String(raw)] || state._devMap[s] || null; // tenta cache
+  if (/^[0-9A-F]{6}$/.test(s)) return s;                          // já é UID hardware limpo
+  const fromCache = state._devMap[String(raw)] || state._devMap[s];
+  if (fromCache) return fromCache;                                  // UUID de plataforma no cache
+  const hexOnly = s.replace(/[^0-9A-F]/g, '');                    // extrai chars hex do identificador (ex: CORE-A402-001 → A402001)
+  if (hexOnly.length >= 6) return hexOnly.slice(-6);              // últimos 6 (parte mais específica)
+  return null;
 }
 function buildPlaces(raw, devMap){
   return raw.map(o=>{
