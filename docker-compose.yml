@@ -1,0 +1,19 @@
+services:
+  a4s-demo:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+      - ./robots.txt:/usr/share/nginx/html/robots.txt:ro
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.a4s-demo.rule=Host(`a4s.heynex.cloud`)"
+      - "traefik.http.routers.a4s-demo.entrypoints=websecure"
+      - "traefik.http.routers.a4s-demo.tls.certresolver=letsencrypt"
+      - "traefik.http.services.a4s-demo.loadbalancer.server.port=80"
+
+networks:
+  traefik:
+    external: true
