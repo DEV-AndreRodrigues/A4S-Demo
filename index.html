@@ -425,7 +425,7 @@ const state = {
   sent:0, failed:0, log:[], openRow:null,
   creds:null, oauth:null, testLog:[], testOpen:null,
   panic:{workers:null, places:null, wLoading:false, pLoading:false, wErr:'', pErr:'', sel:new Set(), place:null, q:'', acion:'Botão'},
-  sd:{workers:null, wLoading:false, wErr:'', sel:new Set(), equipIdx:null},
+  sd:{workers:null, wLoading:false, wErr:'', sel:new Set(), equipIdx:null, equip2Idx:null, activeSub:'homem-maquina'},
   zm:{workers:null, places:null, wLoading:false, pLoading:false, wErr:'', pErr:'', sel:new Set(), place:null, dir:'entry', activeSub:'safe-zone'}
 };
 
@@ -790,7 +790,8 @@ async function send(f, s, ctx, summary){
 }
 function fire(subId){
   if (subId==='panico') return firePanic();
-  if (subId==='homem-maquina') return fireSd();
+  if (subId==='homem-maquina'){ state.sd.activeSub='homem-maquina'; return fireSd(); }
+  if (subId==='maquina-maquina'){ state.sd.activeSub='maquina-maquina'; return fireSd(); }
   if (['safe-zone','red-zone','people-tracking'].includes(subId)){ state.zm.activeSub=subId; return fireZm(); }
   const hit = findSub(subId); if(!hit) return;
   const {f,s} = hit;
@@ -1026,77 +1027,80 @@ async function loadSdWorkers(){
   S.wLoading=false; renderSdLists();
 }
 function renderSdLists(){
-  const wl = $('#sdwList'); if(!wl) return;
-  const S = state.sd; const el = $('#sdeList');
-  const ready = apiReady();
-  // Colaboradores
-  if (!ready && !S.workers) wl.innerHTML = listState('Configure os endpoints e as credenciais da API para carregar os colaboradores.', false, true);
-  else if (S.wLoading) wl.innerHTML = listState('Carregando colaboradores…');
-  else if (S.wErr && !S.workers) wl.innerHTML = listState(`Não foi possível carregar: ${S.wErr}.`, true, true);
-  else if (S.workers){
-    wl.innerHTML = !S.workers.length ? listState('Nenhum colaborador ativo no tenant.')
-      : S.workers.map(w=>{
-          const tag = w.tag ? w.tag.toUpperCase() : '';
-          return `<label class="item"><input type="checkbox" data-sw="${esc(w.id)}"${S.sel.has(w.id)?' checked':''}><div><div class="nm">${esc(w.nome)}</div>${tag?`<div class="sub-txt">TAG ${esc(tag)}</div>`:''}</div></label>`;
-        }).join('');
-  } else wl.innerHTML = listState('Clique em "Atualizar lista" para carregar.');
-  // Equipamentos
+  const S = state.sd; const ready = apiReady();
+  const isHM = S.activeSub === 'homem-maquina';
   const equips = state.equip;
-  if (!equips || !equips.length){
-    el.innerHTML = listState('Configure os equipamentos na aba Configuração > lista de equipamentos.');
+  const equipList = (name, idxKey, listId) => {
+    const el = $('#'+listId); if(!el) return;
+    if (!equips || !equips.length) el.innerHTML = listState('Configure os equipamentos na aba Configuração > lista de equipamentos.');
+    else el.innerHTML = equips.map((eq,i)=>`<label class="item"><input type="radio" name="${name}" data-${name}="${i}"${S[idxKey]===i?' checked':''}><div><div class="nm">${esc(eq.nome)}</div><div class="sub-txt">${esc(eq.core)}</div></div></label>`).join('');
+  };
+  if (isHM){
+    const wl = $('#sdwList'); if(!wl) return;
+    if (!ready && !S.workers) wl.innerHTML = listState('Configure os endpoints e as credenciais da API para carregar os colaboradores.', false, true);
+    else if (S.wLoading) wl.innerHTML = listState('Carregando colaboradores…');
+    else if (S.wErr && !S.workers) wl.innerHTML = listState(`Não foi possível carregar: ${S.wErr}.`, true, true);
+    else if (S.workers) wl.innerHTML = !S.workers.length ? listState('Nenhum colaborador ativo no tenant.')
+      : S.workers.map(w=>{ const tag = w.tag ? w.tag.toUpperCase() : '';
+          return `<label class="item"><input type="checkbox" data-sw="${esc(w.id)}"${S.sel.has(w.id)?' checked':''}><div><div class="nm">${esc(w.nome)}</div>${tag?`<div class="sub-txt">TAG ${esc(tag)}</div>`:''}</div></label>`; }).join('');
+    else wl.innerHTML = listState('Clique em "Atualizar lista" para carregar.');
+    equipList('sdequip','equipIdx','sdeList');
+    const nSel = S.sel.size;
+    const wc = $('#sdwCount'); if(wc) wc.textContent = S.workers ? `${nSel} de ${S.workers.length} selecionados` : '';
+    const ec = $('#sdeCount'); if(ec) ec.textContent = equips.length ? `${equips.length} equipamento${equips.length>1?'s':''}` : '';
+    const equip = S.equipIdx != null ? equips[S.equipIdx] : null;
+    const sum = $('#sdSummary'); if(sum) sum.innerHTML = nSel && equip
+      ? `Safe Distance para <strong>${nSel} colaborador${nSel>1?'es':''}</strong> perto de <strong>${esc(equip.nome)}</strong>.`
+      : nSel ? 'Escolha o equipamento.' : 'Selecione ao menos um colaborador.';
+    const fb = $('#sdFire'); if(fb){ fb.textContent = nSel>1 ? `Gerar ${nSel} eventos` : 'Gerar evento'; fb.disabled = !(nSel && equip); }
+    const rb = $('#sdwReload'); if(rb) rb.disabled = !ready || S.wLoading;
   } else {
-    el.innerHTML = equips.map((eq,i)=>`<label class="item"><input type="radio" name="sdequip" data-se="${i}"${S.equipIdx===i?' checked':''}><div><div class="nm">${esc(eq.nome)}</div><div class="sub-txt">${esc(eq.core)}</div></div></label>`).join('');
+    equipList('sdequip','equipIdx','sdeList');
+    equipList('sdequip2','equip2Idx','sdeList2');
+    const eq1 = S.equipIdx != null ? equips[S.equipIdx] : null;
+    const eq2 = S.equip2Idx != null ? equips[S.equip2Idx] : null;
+    const ec1 = $('#sdeCount'); if(ec1) ec1.textContent = equips.length ? `${equips.length} equipamento${equips.length>1?'s':''}` : '';
+    const ec2 = $('#sdeCount2'); if(ec2) ec2.textContent = equips.length ? `${equips.length} equipamento${equips.length>1?'s':''}` : '';
+    const sum = $('#sdSummary'); if(sum) sum.innerHTML = eq1 && eq2
+      ? `Safe Distance entre <strong>${esc(eq1.nome)}</strong> e <strong>${esc(eq2.nome)}</strong>.`
+      : eq1 ? 'Escolha o segundo equipamento.' : 'Escolha o primeiro equipamento.';
+    const fb = $('#sdFire'); if(fb){ fb.textContent = 'Gerar evento'; fb.disabled = !(eq1 && eq2); }
   }
-  // Contadores e resumo
-  const nSel = S.sel.size;
-  const eqEl = $('#sdwCount'); if(eqEl) eqEl.textContent = S.workers ? `${nSel} de ${S.workers.length} selecionados` : '';
-  const seEl = $('#sdeCount'); if(seEl) seEl.textContent = equips.length ? `${equips.length} equipamento${equips.length>1?'s':''}` : '';
-  const equip = S.equipIdx != null ? equips[S.equipIdx] : null;
-  const sumEl = $('#sdSummary');
-  if (sumEl) sumEl.innerHTML = nSel && equip ? `Safe Distance para <strong>${nSel} colaborador${nSel>1?'es':''}</strong> perto de <strong>${esc(equip.nome)}</strong>.`
-    : nSel ? 'Escolha o equipamento.' : 'Selecione ao menos um colaborador.';
-  const fb = $('#sdFire'); if(fb){ fb.textContent = nSel>1 ? `Gerar ${nSel} eventos` : 'Gerar evento'; fb.disabled = !(nSel && equip); }
-  const rb = $('#sdwReload'); if(rb) rb.disabled = !ready || S.wLoading;
 }
 async function fireSd(){
-  const S = state.sd;
-  const equip = state.equip[S.equipIdx];
-  if (!equip) return;
-  const sub = FEATURES.find(f=>f.id==='safe-distance').subs[0];
-  const workers = (S.workers||[]).filter(w=>S.sel.has(w.id));
-  if (!workers.length) return;
-  for (const w of workers){
-    const msgId = uuid();
-    const payload = {type:'safe_distance.person_machine', worker:{id:w.id, nome:w.nome, tag:w.tag||null}, equipment:{nome:equip.nome, core:equip.core}, timestamp:new Date().toISOString(), messageId:msgId};
-    const summary = `${w.nome} – ${equip.nome}`;
-    if (state.mode==='sim'){
-      state.sent++;
-      addLog({f:sub, s:sub, summary, status:'sim', code:'Simulado', payload});
-    } else {
-      const url = apiUrl(state.cfg.ingestPath);
-      if (!url){ state.failed++; addLog({f:sub, s:sub, summary, status:'err', code:'Sem endpoint', payload}); }
-      else {
-        try{
-          const headers = {'Content-Type':'application/json', ...(await authHeaders())};
-          const res = await fetchT(url, {method:'POST', headers, body:JSON.stringify(payload)}, 8000);
-          res.ok ? state.sent++ : state.failed++;
-          addLog({f:sub, s:sub, summary, status:res.ok?'ok':'err', code:`HTTP ${res.status}`, payload});
-        }catch(err){
-          state.failed++;
-          addLog({f:sub, s:sub, summary, status:'err', code:netErr(err), payload:{erro:err.message, colaborador:{nome:w.nome, tag:w.tag||null}, equipamento:{nome:equip.nome, core:equip.core}}});
-        }
-      }
+  const S = state.sd; const equips = state.equip;
+  const f = FEATURES.find(x=>x.id==='safe-distance');
+  if (S.activeSub === 'homem-maquina'){
+    const sub = f.subs[0]; const equip = equips[S.equipIdx]; if(!equip) return;
+    const workers = (S.workers||[]).filter(w=>S.sel.has(w.id)); if(!workers.length) return;
+    for (const w of workers){
+      const payload = {type:'safe_distance.person_machine', worker:{id:w.id, nome:w.nome, tag:w.tag||null}, equipment:{nome:equip.nome, core:equip.core}, timestamp:new Date().toISOString(), messageId:uuid()};
+      const summary = `${w.nome} – ${equip.nome}`;
+      await _sdSend(f, sub, summary, payload);
     }
+  } else {
+    const sub = f.subs[1]; const eq1 = equips[S.equipIdx]; const eq2 = equips[S.equip2Idx]; if(!eq1||!eq2) return;
+    const payload = {type:'safe_distance.machine_machine', equipment1:{nome:eq1.nome, core:eq1.core}, equipment2:{nome:eq2.nome, core:eq2.core}, timestamp:new Date().toISOString(), messageId:uuid()};
+    const summary = `${eq1.nome} – ${eq2.nome}`;
+    await _sdSend(f, sub, summary, payload);
   }
   refreshStats();
 }
+async function _sdSend(f, sub, summary, payload){
+  if (state.mode==='sim'){ state.sent++; addLog({f, s:sub, summary, status:'sim', code:'Simulado', payload}); return; }
+  const url = apiUrl(state.cfg.ingestPath);
+  if (!url){ state.failed++; addLog({f, s:sub, summary, status:'err', code:'Sem endpoint', payload}); return; }
+  try{
+    const headers = {'Content-Type':'application/json', ...(await authHeaders())};
+    const res = await fetchT(url, {method:'POST', headers, body:JSON.stringify(payload)}, 8000);
+    res.ok ? state.sent++ : state.failed++;
+    addLog({f, s:sub, summary, status:res.ok?'ok':'err', code:`HTTP ${res.status}`, payload});
+  }catch(err){ state.failed++; addLog({f, s:sub, summary, status:'err', code:netErr(err), payload:{erro:err.message}}); }
+}
 function sdView(f){
-  const sub = f.subs[0]; const sub2 = f.subs[1]; const S = state.sd;
-  const on = !!state.timers[sub.id];
-  return `<h1 class="section">${esc(f.nome)}</h1>${crumbs(f)}
-    <p class="lead">${esc(f.desc)}</p>
-    <h2 class="sub-section">${esc(sub.nome)}</h2>
-    <p class="lead" style="margin-top:0">${esc(sub.desc)}</p>
+  const S = state.sd; const isHM = S.activeSub==='homem-maquina';
+  const sub = isHM ? f.subs[0] : f.subs[1]; const on = !!state.timers[sub.id];
+  const pickerHM = `
     <div class="panic-layout">
       <section class="panel pick" aria-labelledby="sdwTitle">
         <div class="pick-head"><h2 id="sdwTitle">Colaboradores</h2><span class="count" id="sdwCount"></span></div>
@@ -1105,28 +1109,39 @@ function sdView(f){
           <button class="link-btn" type="button" id="sdwNone">Limpar seleção</button>
           <button class="link-btn" type="button" id="sdwReload" style="margin-left:auto">Atualizar lista</button>
         </div>
-        <div class="list" id="sdwList" role="group" aria-label="Colaboradores com dispositivo"></div>
+        <div class="list" id="sdwList" role="group" aria-label="Colaboradores"></div>
       </section>
       <section class="panel pick" aria-labelledby="sdeTitle">
         <div class="pick-head"><h2 id="sdeTitle">Equipamento</h2><span class="count" id="sdeCount"></span></div>
         <div class="pick-tools"><span class="count">Um equipamento por evento</span></div>
-        <div class="list" id="sdeList" role="radiogroup" aria-label="Equipamentos disponíveis"></div>
+        <div class="list" id="sdeList" role="radiogroup" aria-label="Equipamentos"></div>
       </section>
+    </div>`;
+  const pickerMM = `
+    <div class="panic-layout">
+      <section class="panel pick" aria-labelledby="sde1Title">
+        <div class="pick-head"><h2 id="sde1Title">Equipamento 1</h2><span class="count" id="sdeCount"></span></div>
+        <div class="pick-tools"><span class="count">Primeiro equipamento</span></div>
+        <div class="list" id="sdeList" role="radiogroup" aria-label="Equipamento 1"></div>
+      </section>
+      <section class="panel pick" aria-labelledby="sde2Title">
+        <div class="pick-head"><h2 id="sde2Title">Equipamento 2</h2><span class="count" id="sdeCount2"></span></div>
+        <div class="pick-tools"><span class="count">Segundo equipamento</span></div>
+        <div class="list" id="sdeList2" role="radiogroup" aria-label="Equipamento 2"></div>
+      </section>
+    </div>`;
+  return `<h1 class="section">${esc(f.nome)}</h1>${crumbs(f)}
+    <p class="lead">${esc(f.desc)}</p>
+    <div class="zm-tabs">
+      ${f.subs.map(s=>`<button class="zm-tab${S.activeSub===s.id?' active':''}" type="button" data-sdtab="${s.id}">${esc(s.nome)}</button>`).join('')}
     </div>
+    <p class="lead" style="margin-top:16px">${esc(sub.desc)}</p>
+    ${isHM ? pickerHM : pickerMM}
     <div class="panel panic-bar">
       <div class="summary" id="sdSummary"></div>
       <span class="badge ${on?'on':'off'}">${on?'Automático ativo':'Parado'}</span>
       <button class="btn primary" type="button" id="sdFire">Gerar evento</button>
       ${autoControls(sub.id)}
-    </div>
-    <h2 class="sub-section" style="margin-top:32px">${esc(sub2.nome)}</h2>
-    <div class="subgrid">
-      <article class="panel sub">
-        <div class="sub-head"><span class="badge ${!!state.timers[sub2.id]?'on':'off'}">${!!state.timers[sub2.id]?'Automático ativo':'Parado'}</span></div>
-        <h3>${esc(sub2.nome)}</h3>
-        <p class="sub-desc">${esc(sub2.desc)}</p>
-        <div class="sub-foot">${autoControls(sub2.id)}</div>
-      </article>
     </div>
     ${consoleBlock()}`;
 }
@@ -1604,6 +1619,7 @@ document.addEventListener('click', async e=>{
   if (t.dataset.burst){ burst(t.dataset.burst, 10); return; }
   if (t.dataset.auto){ toggleAuto(t.dataset.auto); return; }
   if (t.dataset.zmtab){ state.zm.activeSub=t.dataset.zmtab; const f=FEATURES.find(x=>x.id==='zone-map'); $('#view').innerHTML=zmView(f); renderConsole(); refreshStats(); renderZmLists(); return; }
+  if (t.dataset.sdtab){ state.sd.activeSub=t.dataset.sdtab; const f=FEATURES.find(x=>x.id==='safe-distance'); $('#view').innerHTML=sdView(f); renderConsole(); refreshStats(); renderSdLists(); if(t.dataset.sdtab==='homem-maquina'&&apiReady()&&!state.sd.workers&&!state.sd.wLoading&&!state.sd.wErr) loadSdWorkers(); return; }
   switch(t.id){
     case 'stopAllBtn': stopAll(); return;
     case 'clearLog': state.log=[]; state.sent=0; state.failed=0; renderConsole(); refreshStats(); return;
@@ -1691,7 +1707,8 @@ document.addEventListener('change', e=>{
   if (t.dataset.w!==undefined){ const P=state.panic; t.checked ? P.sel.add(t.dataset.w) : P.sel.delete(t.dataset.w); renderPanicLists(); return; }
   if (t.dataset.p!==undefined){ state.panic.place = t.dataset.p; renderPanicLists(); return; }
   if (t.dataset.sw!==undefined){ const S=state.sd; t.checked ? S.sel.add(t.dataset.sw) : S.sel.delete(t.dataset.sw); renderSdLists(); return; }
-  if (t.dataset.se!==undefined){ state.sd.equipIdx = +t.dataset.se; renderSdLists(); return; }
+  if (t.dataset.sdequip!==undefined){ state.sd.equipIdx = +t.dataset.sdequip; renderSdLists(); return; }
+  if (t.dataset.sdequip2!==undefined){ state.sd.equip2Idx = +t.dataset.sdequip2; renderSdLists(); return; }
   if (t.dataset.zw!==undefined){ const Z=state.zm; t.checked ? Z.sel.add(t.dataset.zw) : Z.sel.delete(t.dataset.zw); renderZmLists(); return; }
   if (t.dataset.zp!==undefined){ state.zm.place = t.dataset.zp; renderZmLists(); return; }
   if (t.name==='zmdir'){ state.zm.dir=t.value; renderZmLists(); return; }
