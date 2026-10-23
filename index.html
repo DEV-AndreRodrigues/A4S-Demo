@@ -733,7 +733,11 @@ function utcNoMs(){ return new Date().toISOString().replace(/\.\d{3}Z$/,'Z'); }
 function buildPanicFrame(w, pl){
   let tp = tagPart(w.tag);
   if (!tp){
-    if (state.mode !== 'sim') throw new Error(`TAG "${w.tag}" não tem 6 dígitos`);
+    const manual = state.workers.find(m => (m.mat && m.mat === w.mat) || m.nome.toLowerCase() === w.nome.toLowerCase());
+    if (manual) tp = tagPart(manual.tag);
+  }
+  if (!tp){
+    if (state.mode !== 'sim') throw new Error(`TAG "${w.nome}" não encontrada. Cadastre nome;matrícula;TAG na configuração manual.`);
     const h = [...String(w.id)].reduce((a,c)=>((a<<5)-a+c.charCodeAt(0))|0, 0);
     tp = '00' + (Math.abs(h) % 0xFFFFFF).toString(16).toUpperCase().padStart(6,'0');
   }
