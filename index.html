@@ -631,20 +631,29 @@ async function loadPanicWorkers(){
   P.wLoading=false; renderPanicLists();
 }
 async function fetchDeviceUidMap(){
+  const LIMIT = 100; const MAX_PAGES = 20; const PAGE_TIMEOUT = 8000;
+  async function fetchPage(url, headers){
+    return Promise.race([
+      apiFetch(url, {method:'GET', headers}),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), PAGE_TIMEOUT))
+    ]);
+  }
   try{
     const base = apiUrl('/platform/devices');
     if (!base) return {};
     const headers = {'Accept':'application/json', ...(await authHeaders())};
     const map = {};
-    const LIMIT = 100;
     let page = 1;
-    for (let i=0; i<50; i++){
-      const r = await apiFetch(base + `?page=${page}&limit=${LIMIT}`, {method:'GET', headers});
-      if (!r.ok) break;
-      const j = await r.json();
-      const devs = (j?.data?.devices) || (j?.data?.items) || (j?.data?.results) || (Array.isArray(j?.data) ? j.data : []);
+    for (let i=0; i<MAX_PAGES; i++){
+      let r, j, devs;
+      try{
+        r = await fetchPage(base + `?page=${page}&limit=${LIMIT}`, headers);
+        if (!r.ok) break;
+        j = await r.json();
+        devs = (j?.data?.devices) || (j?.data?.items) || (j?.data?.results) || (Array.isArray(j?.data) ? j.data : []);
+      }catch(e){ break; }
+      if (!devs || !devs.length) break;
       devs.forEach(d=>{ if(d.id && d.uid) map[d.id]=d.uid.toUpperCase(); });
-      // stop if last page
       if (devs.length < LIMIT) break;
       const meta = j?.meta ?? j?.pagination ?? j?.data?.meta ?? {};
       if (meta.hasNext === false || meta.hasNextPage === false) break;
