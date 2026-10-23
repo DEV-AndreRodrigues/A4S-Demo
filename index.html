@@ -425,7 +425,7 @@ const state = {
   sent:0, failed:0, log:[], openRow:null,
   creds:null, oauth:null, testLog:[], testOpen:null, _devMap:{},
   panic:{workers:null, places:null, wLoading:false, pLoading:false, wErr:'', pErr:'', sel:new Set(), place:null, q:'', acion:'Botão'},
-  sd:{workers:null, wLoading:false, wErr:'', sel:new Set(), equipIdx:null, equip2Idx:null, activeSub:'homem-maquina'},
+  sd:{workers:null, equips:null, wLoading:false, eLoading:false, wErr:'', eErr:'', sel:new Set(), equipIdx:null, equip2Idx:null, activeSub:'homem-maquina'},
   zm:{workers:null, places:null, wLoading:false, pLoading:false, wErr:'', pErr:'', sel:new Set(), place:null, dir:'entry', activeSub:'safe-zone'}
 };
 
@@ -1035,13 +1035,32 @@ async function loadSdWorkers(){
   }catch(e){ S.wErr = netErr(e); }
   S.wLoading=false; renderSdLists();
 }
+async function loadSdEquips(){
+  const S = state.sd; S.eLoading=true; S.eErr=''; renderSdLists();
+  let raw;
+  try{
+    raw = await apiList(state.cfg.placesPath);
+    S.equips = buildPlaces(raw, {});
+    if (S.equipIdx != null && !S.equips[S.equipIdx]) S.equipIdx = null;
+    if (S.equip2Idx != null && !S.equips[S.equip2Idx]) S.equip2Idx = null;
+  }catch(e){ S.eErr = netErr(e); S.eLoading=false; renderSdLists(); return; }
+  S.eLoading=false; renderSdLists();
+  fetchDeviceUidMap().then(devMap=>{
+    if (!Object.keys(devMap).length) return;
+    S.equips = buildPlaces(raw, devMap);
+    renderSdLists();
+  }).catch(()=>{});
+}
 function renderSdLists(){
   const S = state.sd; const ready = apiReady();
   const isHM = S.activeSub === 'homem-maquina';
-  const equips = state.equip;
+  const equips = S.equips || [];
   const equipList = (name, idxKey, listId) => {
     const el = $('#'+listId); if(!el) return;
-    if (!equips || !equips.length) el.innerHTML = listState('Configure os equipamentos na aba Configuração > lista de equipamentos.');
+    if (!ready && !S.equips) el.innerHTML = listState('Configure os endpoints e as credenciais da API para carregar os equipamentos.', false, true);
+    else if (S.eLoading) el.innerHTML = listState('Carregando equipamentos…');
+    else if (S.eErr && !S.equips) el.innerHTML = listState(`Não foi possível carregar: ${S.eErr}.`, true, true);
+    else if (!equips.length) el.innerHTML = listState('Nenhum equipamento com CORE associado no tenant.');
     else el.innerHTML = equips.map((eq,i)=>`<label class="item"><input type="radio" name="${name}" data-${name}="${i}"${S[idxKey]===i?' checked':''}><div><div class="nm">${esc(eq.nome)}</div><div class="sub-txt">${esc(eq.core)}</div></div></label>`).join('');
   };
   if (isHM){
@@ -1063,6 +1082,7 @@ function renderSdLists(){
       : nSel ? 'Escolha o equipamento.' : 'Selecione ao menos um colaborador.';
     const fb = $('#sdFire'); if(fb){ fb.textContent = nSel>1 ? `Gerar ${nSel} eventos` : 'Gerar evento'; fb.disabled = !(nSel && equip); }
     const rb = $('#sdwReload'); if(rb) rb.disabled = !ready || S.wLoading;
+    const er = $('#sdeReload'); if(er) er.disabled = !ready || S.eLoading;
   } else {
     equipList('sdequip','equipIdx','sdeList');
     equipList('sdequip2','equip2Idx','sdeList2');
@@ -1096,13 +1116,16 @@ function buildSdFrameHM(w, equip, code){
   return {type:12, id:coreUid, code, data:tp+hex8(dist), date:utcNoMs(), messageId:uuid()};
 }
 function buildSdFrameMM(eq1, eq2, code){
-  if (!eq1.core) throw new Error(`Equipamento "${eq1.nome}" sem CORE configurado.`);
-  const corePart = '00' + String(eq2.core).toUpperCase().padStart(6,'0').slice(-6);
+  const core1 = resolveCore(eq1.core) || resolveCore(eq1.rawCore);
+  if (!core1) throw new Error(`Equipamento "${eq1.nome}" sem UID de CORE válido.`);
+  const core2 = resolveCore(eq2.core) || resolveCore(eq2.rawCore);
+  if (!core2) throw new Error(`Equipamento "${eq2.nome}" sem UID de CORE válido.`);
+  const corePart = '00' + core2.padStart(6,'0').slice(-6);
   const dist = 1 + Math.floor(Math.random()*8);
-  return {type:12, id:String(eq1.core), code, data:corePart+hex8(dist), date:utcNoMs(), messageId:uuid()};
+  return {type:12, id:core1, code, data:corePart+hex8(dist), date:utcNoMs(), messageId:uuid()};
 }
 function fireSd(){
-  const S = state.sd; const equips = state.equip;
+  const S = state.sd; const equips = S.equips || [];
   const f = FEATURES.find(x=>x.id==='safe-distance');
   if (S.activeSub === 'homem-maquina'){
     const sub = f.subs[0]; const equip = equips[S.equipIdx]; if(!equip) return;
@@ -1147,7 +1170,7 @@ function sdView(f){
       </section>
       <section class="panel pick" aria-labelledby="sdeTitle">
         <div class="pick-head"><h2 id="sdeTitle">Equipamento</h2><span class="count" id="sdeCount"></span></div>
-        <div class="pick-tools"><span class="count">Um equipamento por evento</span></div>
+        <div class="pick-tools"><span class="count">Um equipamento por evento</span><button class="link-btn" type="button" id="sdeReload" style="margin-left:auto">Atualizar lista</button></div>
         <div class="list" id="sdeList" role="radiogroup" aria-label="Equipamentos"></div>
       </section>
     </div>`;
@@ -1155,7 +1178,7 @@ function sdView(f){
     <div class="panic-layout">
       <section class="panel pick" aria-labelledby="sde1Title">
         <div class="pick-head"><h2 id="sde1Title">Equipamento 1</h2><span class="count" id="sdeCount"></span></div>
-        <div class="pick-tools"><span class="count">Primeiro equipamento</span></div>
+        <div class="pick-tools"><span class="count">Primeiro equipamento</span><button class="link-btn" type="button" id="sdeReload" style="margin-left:auto">Atualizar lista</button></div>
         <div class="list" id="sdeList" role="radiogroup" aria-label="Equipamento 1"></div>
       </section>
       <section class="panel pick" aria-labelledby="sde2Title">
@@ -1452,7 +1475,7 @@ function configView(){
       </details>
     </div>`;
 }
-function resetPanicData(){ state.oauth=null; Object.assign(state.panic,{workers:null, places:null, sel:new Set(), place:null, wErr:'', pErr:''}); Object.assign(state.sd,{workers:null, sel:new Set(), equipIdx:null, wErr:''}); Object.assign(state.zm,{workers:null, places:null, sel:new Set(), place:null, wErr:'', pErr:''}); }
+function resetPanicData(){ state.oauth=null; Object.assign(state.panic,{workers:null, places:null, sel:new Set(), place:null, wErr:'', pErr:''}); Object.assign(state.sd,{workers:null, equips:null, sel:new Set(), equipIdx:null, equip2Idx:null, wErr:'', eErr:''}); Object.assign(state.zm,{workers:null, places:null, sel:new Set(), place:null, wErr:'', pErr:''}); }
 async function saveApiFromForm(){
   const msg = $('#apiMsg'); const set=(t,ok)=>{ msg.textContent=t; msg.className='msg '+(ok?'ok':'err'); };
   const endpoint=$('#cApiBase').value.trim();
@@ -1610,6 +1633,7 @@ function route(){
     renderSdLists();
     const S = state.sd;
     if (apiReady() && !S.workers && !S.wLoading && !S.wErr) loadSdWorkers();
+    if (apiReady() && !S.equips && !S.eLoading && !S.eErr) loadSdEquips();
   }
   if (m && m[1]==='zone-map'){
     renderZmLists();
@@ -1653,7 +1677,7 @@ document.addEventListener('click', async e=>{
   if (t.dataset.burst){ burst(t.dataset.burst, 10); return; }
   if (t.dataset.auto){ toggleAuto(t.dataset.auto); return; }
   if (t.dataset.zmtab){ state.zm.activeSub=t.dataset.zmtab; const f=FEATURES.find(x=>x.id==='zone-map'); $('#view').innerHTML=zmView(f); renderConsole(); refreshStats(); renderZmLists(); return; }
-  if (t.dataset.sdtab){ state.sd.activeSub=t.dataset.sdtab; const f=FEATURES.find(x=>x.id==='safe-distance'); $('#view').innerHTML=sdView(f); renderConsole(); refreshStats(); renderSdLists(); if(t.dataset.sdtab==='homem-maquina'&&apiReady()&&!state.sd.workers&&!state.sd.wLoading&&!state.sd.wErr) loadSdWorkers(); return; }
+  if (t.dataset.sdtab){ state.sd.activeSub=t.dataset.sdtab; const f=FEATURES.find(x=>x.id==='safe-distance'); $('#view').innerHTML=sdView(f); renderConsole(); refreshStats(); renderSdLists(); const _S=state.sd; if(apiReady()&&!_S.workers&&!_S.wLoading&&!_S.wErr) loadSdWorkers(); if(apiReady()&&!_S.equips&&!_S.eLoading&&!_S.eErr) loadSdEquips(); return; }
   switch(t.id){
     case 'stopAllBtn': stopAll(); return;
     case 'clearLog': state.log=[]; state.sent=0; state.failed=0; renderConsole(); refreshStats(); return;
@@ -1662,6 +1686,7 @@ document.addEventListener('click', async e=>{
     case 'wAll': { const P=state.panic; (P.workers||[]).forEach(w=>P.sel.add(w.id)); renderPanicLists(); return; }
     case 'wNone': state.panic.sel.clear(); renderPanicLists(); return;
     case 'sdwReload': state.sd.wErr=''; loadSdWorkers(); return;
+    case 'sdeReload': state.sd.eErr=''; loadSdEquips(); return;
     case 'sdwAll': { const S=state.sd; (S.workers||[]).forEach(w=>S.sel.add(w.id)); renderSdLists(); return; }
     case 'sdwNone': state.sd.sel.clear(); renderSdLists(); return;
     case 'sdFire': fireSd(); return;
