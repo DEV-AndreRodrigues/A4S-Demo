@@ -1,0 +1,18 @@
+services:
+  ponte:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./ponte_smart_safety.py:/app/ponte_smart_safety.py:ro
+    environment:
+      BRIDGE_BIND: "0.0.0.0"
+      BRIDGE_PORT: "8765"
+      BRIDGE_ALLOWED_ORIGINS: "https://a4s.heynex.cloud"
+    command: python3 ponte_smart_safety.py
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.a4s-ponte.rule=Host(`ponte.a4s.heynex.cloud`)"
+      - "traefik.http.routers.a4s-ponte.entrypoints=websecure"
+      - "traefik.http.routers.a4s-ponte.tls.certresolver=letsencrypt"
+      - "traefik.http.services.a4s-ponte.loadbalancer.server.port=8765"

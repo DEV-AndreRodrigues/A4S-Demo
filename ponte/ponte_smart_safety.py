@@ -201,8 +201,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    srv = ThreadingHTTPServer(("127.0.0.1", LISTEN_PORT), Handler)
-    print(f"Ponte Smart Safety ativa em http://127.0.0.1:{LISTEN_PORT}")
+    bind = os.environ.get("BRIDGE_BIND", "127.0.0.1")
+    srv = ThreadingHTTPServer((bind, LISTEN_PORT), Handler)
+    print(f"Ponte Smart Safety ativa em http://{bind}:{LISTEN_PORT}")
     print(f"Destino TCP: {'configurado' if TARGET_HOST and TARGET_PORT else 'NÃO configurado (Botão de Pânico não envia)'}")
     print(f"Origens permitidas: {', '.join(sorted(ALLOWED_ORIGINS))}")
     print("Proxy da API REST: ativo (GET, *.a4s.io)")
