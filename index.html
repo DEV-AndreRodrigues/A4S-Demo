@@ -615,15 +615,25 @@ async function apiList(path){
   }
   return all;
 }
+function findManualWorker(nome, mat){
+  const nl = nome.toLowerCase(); const ml = (mat||'').toLowerCase();
+  return state.workers.find(m=>{
+    if (ml && m.mat && m.mat.toLowerCase()===ml) return true;
+    const mn = m.nome.toLowerCase();
+    return mn===nl || nl.includes(mn) || mn.includes(nl);
+  });
+}
 async function loadPanicWorkers(){
   const P = state.panic; P.wLoading=true; P.wErr=''; renderPanicLists();
   try{
     const raw = await apiList(state.cfg.workersPath);
     P.workers = raw.map(o=>{
-      const tag = devId(pickField(o, state.cfg.wDev));
+      let tag = devId(pickField(o, state.cfg.wDev));
       const nome = String(pickField(o, state.cfg.wNome) ?? '');
+      const mat = String(pickField(o, state.cfg.wMat) ?? '');
       const active = pickField(o, 'active|status');
-      return {id:String(pickField(o, state.cfg.wId) ?? nome), nome, mat:String(pickField(o, state.cfg.wMat) ?? ''), tag, active};
+      if (!tag){ const m = findManualWorker(nome, mat); if(m&&m.tag) tag=m.tag; }
+      return {id:String(pickField(o, state.cfg.wId) ?? nome), nome, mat, tag, active};
     }).filter(w=>w.nome && (w.active !== false)).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
     const ids = new Set(P.workers.map(w=>w.id));
     P.sel = new Set([...P.sel].filter(id=>ids.has(id)));
@@ -772,7 +782,7 @@ function utcNoMs(){ return new Date().toISOString().replace(/\.\d{3}Z$/,'Z'); }
 function buildPanicFrame(w, pl){
   let tp = tagPart(w.tag);
   if (!tp){
-    const manual = state.workers.find(m => (m.mat && m.mat === w.mat) || m.nome.toLowerCase() === w.nome.toLowerCase());
+    const manual = findManualWorker(w.nome, w.mat);
     if (manual) tp = tagPart(manual.tag);
   }
   if (!tp){
@@ -807,7 +817,7 @@ function firePanic(){
   ws.forEach((w,i)=>setTimeout(()=>{
     let built;
     try{ built = buildPanicFrame(w, pl); }
-    catch(e){ state.failed++; addLog({f,s,summary:`${w.nome} – ${pl.nome}`,status:'err',code:'Dado inválido',payload:e.message}); refreshStats(); return; }
+    catch(e){ state.failed++; addLog({f,s,summary:`${w.nome} – ${pl.nome}`,status:'err',code:'Dado inválido',payload:{erro:e.message, colaborador:{nome:w.nome,mat:w.mat,tag:w.tag||'(não encontrada)'}, ambiente:{nome:pl.nome,core:pl.core}}}); refreshStats(); return; }
     sendFrame(f, s, built.frame, `${w.nome} – ${pl.nome} – ${built.dist} m`);
   }, i*250));
   return true;
