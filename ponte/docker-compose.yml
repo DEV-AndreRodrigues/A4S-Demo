@@ -5,6 +5,7 @@ services:
     working_dir: /app
     volumes:
       - ./ponte_smart_safety.py:/app/ponte_smart_safety.py:ro
+      - ./ponte.config.json:/app/ponte.config.json:ro
     environment:
       BRIDGE_BIND: "0.0.0.0"
       BRIDGE_PORT: "8765"
