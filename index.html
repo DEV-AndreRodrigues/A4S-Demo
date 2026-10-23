@@ -633,9 +633,15 @@ async function loadPanicWorkers(){
 async function loadPanicPlaces(){
   const P = state.panic; P.pLoading=true; P.pErr=''; renderPanicLists();
   try{
-    const raw = await apiList(state.cfg.placesPath);
+    const [raw, devRaw] = await Promise.all([
+      apiList(state.cfg.placesPath),
+      apiList('/platform/devices?page=1&limit=500').catch(()=>[])
+    ]);
+    const devMap = {};
+    devRaw.forEach(d=>{ if(d.id && d.uid) devMap[d.id]=d.uid; });
     P.places = raw.map(o=>{
-      const core = devId(pickField(o, state.cfg.pDev));
+      const rawCore = devId(pickField(o, state.cfg.pDev));
+      const core = devMap[rawCore] || rawCore;
       const nome = String(pickField(o, state.cfg.pNome) ?? '');
       return {id:String(pickField(o, state.cfg.pId) ?? nome), nome, core};
     }).filter(p=>p.core && p.nome).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
