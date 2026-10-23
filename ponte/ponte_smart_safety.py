@@ -51,7 +51,7 @@ ALLOWED_ORIGINS = set(o.strip() for o in _env_origins.split(",")) if _env_origin
 ALLOWED = {(12, 100)}
 KEYS = ["type", "id", "code", "data", "date", "messageId"]
 RE_DATA = re.compile(r"^[0-9A-F]{16}$")
-RE_ID = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+RE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 RE_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 # Proxy da API: só GET, só domínios a4s.io, só as rotas que a página usa.
