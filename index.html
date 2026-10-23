@@ -1314,7 +1314,7 @@ document.addEventListener('change', e=>{
   }
   if (t.dataset.w!==undefined){ const P=state.panic; t.checked ? P.sel.add(t.dataset.w) : P.sel.delete(t.dataset.w); renderPanicLists(); return; }
   if (t.dataset.p!==undefined){ state.panic.place = t.dataset.p; renderPanicLists(); return; }
-  if (t.name==='mode'){ state.mode = t.value; applyMode(); toast(t.value==='live'?'Envio real ativado.':'Modo simulação ativado.'); return; }
+  if (t.name==='mode'){ state.mode = t.value; applyMode(); try{localStorage.setItem('a4s-demo-mode',t.value);}catch(e){} toast(t.value==='live'?'Envio real ativado.':'Modo simulação ativado.'); return; }
   if (t.id==='cAuth'){ $('#authHeadersBox').hidden = t.value==='oauth'; $('#authOauthBox').hidden = t.value!=='oauth'; }
 });
 window.addEventListener('hashchange', route);
@@ -1343,7 +1343,7 @@ async function gateCheck(pwd){
 }
 function startApp(){
   document.body.classList.remove('locked');
-  if (!started){ started = true; loadCfg(); applyMode(); }
+  if (!started){ started = true; loadCfg(); try{const m=localStorage.getItem('a4s-demo-mode'); if(m==='live'||m==='sim') state.mode=m;}catch(e){} applyMode(); }
   // auto-desbloquear credenciais sem PIN
   const rec = credRecord();
   if (rec && rec.nopin && !state.creds){
