@@ -423,7 +423,7 @@ const state = {
   workers:[], equip:[], places:[],
   values:{}, timers:{}, intervals:{},
   sent:0, failed:0, log:[], openRow:null,
-  creds:null, oauth:null, testLog:[], testOpen:null,
+  creds:null, oauth:null, testLog:[], testOpen:null, _devMap:{},
   panic:{workers:null, places:null, wLoading:false, pLoading:false, wErr:'', pErr:'', sel:new Set(), place:null, q:'', acion:'Botão'},
   sd:{workers:null, wLoading:false, wErr:'', sel:new Set(), equipIdx:null, equip2Idx:null, activeSub:'homem-maquina'},
   zm:{workers:null, places:null, wLoading:false, pLoading:false, wErr:'', pErr:'', sel:new Set(), place:null, dir:'entry', activeSub:'safe-zone'}
@@ -684,8 +684,16 @@ async function fetchDeviceUidMap(){
       if (total != null && page*LIMIT >= total) break;
       page++;
     }
+    Object.assign(state._devMap, map); // cache global — lookup de último momento no fire
     return map;
   }catch(e){ return {}; }
+}
+/* Resolve UUID de plataforma → UID hardware hex-6; retorna o valor já resolvido se vier direto */
+function resolveCore(raw){
+  if (!raw) return null;
+  const s = String(raw).trim().toUpperCase();
+  if (/^[0-9A-F]{6}$/.test(s)) return s;                     // já é UID hardware
+  return state._devMap[String(raw)] || state._devMap[s] || null; // tenta cache
 }
 function buildPlaces(raw, devMap){
   return raw.map(o=>{
@@ -813,9 +821,10 @@ function buildPanicFrame(w, pl){
     const h = [...String(w.id)].reduce((a,c)=>((a<<5)-a+c.charCodeAt(0))|0, 0);
     tp = '00' + (Math.abs(h) % 0xFFFFFF).toString(16).toUpperCase().padStart(6,'0');
   }
-  if (!pl.core) throw new Error('Ambiente sem CORE associado');
+  const coreUid = resolveCore(pl.core) || resolveCore(pl.rawCore);
+  if (!coreUid) throw new Error(`Ambiente "${pl.nome}" sem UID de CORE resolvido. Aguarde o carregamento das listas ou verifique a configuração.`);
   const dist = 3 + Math.floor(Math.random()*18); // 3 a 20 m
-  return {frame:{type:12, id:String(pl.core), code:100, data:tp+hex8(dist), date:utcNoMs(), messageId:uuid()}, dist};
+  return {frame:{type:12, id:coreUid, code:100, data:tp+hex8(dist), date:utcNoMs(), messageId:uuid()}, dist};
 }
 async function sendFrame(f, s, frame, summary){
   if (state.mode==='sim'){ state.sent++; addLog({f,s,summary,status:'sim',code:'Simulado',payload:frame}); refreshStats(); return; }
@@ -1081,9 +1090,10 @@ function buildSdFrameHM(w, equip, code){
     const h = [...String(w.id)].reduce((a,c)=>((a<<5)-a+c.charCodeAt(0))|0, 0);
     tp = '00' + (Math.abs(h) % 0xFFFFFF).toString(16).toUpperCase().padStart(6,'0');
   }
-  if (!equip.core) throw new Error(`Equipamento "${equip.nome}" sem CORE configurado.`);
+  const coreUid = resolveCore(equip.core);
+  if (!coreUid) throw new Error(`Equipamento "${equip.nome}" sem UID de CORE válido. Configure 6 caracteres hex (ex: A1B2C3).`);
   const dist = 1 + Math.floor(Math.random()*8);
-  return {type:12, id:String(equip.core), code, data:tp+hex8(dist), date:utcNoMs(), messageId:uuid()};
+  return {type:12, id:coreUid, code, data:tp+hex8(dist), date:utcNoMs(), messageId:uuid()};
 }
 function buildSdFrameMM(eq1, eq2, code){
   if (!eq1.core) throw new Error(`Equipamento "${eq1.nome}" sem CORE configurado.`);
