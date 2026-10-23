@@ -676,22 +676,30 @@ async function fetchDeviceUidMap(){
     return map;
   }catch(e){ return {}; }
 }
+function buildPlaces(raw, devMap){
+  return raw.map(o=>{
+    const rawCore = devId(pickField(o, state.cfg.pDev));
+    const core = devMap[rawCore] || rawCore;
+    const nome = String(pickField(o, state.cfg.pNome) ?? '');
+    return {id:String(pickField(o, state.cfg.pId) ?? nome), nome, core, rawCore};
+  }).filter(p=>p.core && p.nome).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+}
 async function loadPanicPlaces(){
   const P = state.panic; P.pLoading=true; P.pErr=''; renderPanicLists();
+  let raw;
   try{
-    const [raw, devMap] = await Promise.all([
-      apiList(state.cfg.placesPath),
-      fetchDeviceUidMap()
-    ]);
-    P.places = raw.map(o=>{
-      const rawCore = devId(pickField(o, state.cfg.pDev));
-      const core = devMap[rawCore] || rawCore;
-      const nome = String(pickField(o, state.cfg.pNome) ?? '');
-      return {id:String(pickField(o, state.cfg.pId) ?? nome), nome, core};
-    }).filter(p=>p.core && p.nome).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+    raw = await apiList(state.cfg.placesPath);
+    P.places = buildPlaces(raw, {});  // mostra imediatamente com ID bruto
     if (P.place && !P.places.some(p=>p.id===P.place)) P.place = null;
-  }catch(e){ P.pErr = netErr(e); }
+  }catch(e){ P.pErr = netErr(e); P.pLoading=false; renderPanicLists(); return; }
   P.pLoading=false; renderPanicLists();
+  // resolve UIDs em background — atualiza quando chegar
+  fetchDeviceUidMap().then(devMap=>{
+    if (!Object.keys(devMap).length) return;
+    P.places = buildPlaces(raw, devMap);
+    if (P.place && !P.places.some(p=>p.id===P.place)) P.place = null;
+    renderPanicLists();
+  }).catch(()=>{});
 }
 function apiReady(){ return !!(apiUrl(state.cfg.workersPath) && apiUrl(state.cfg.placesPath) && credRecord()); }
 
