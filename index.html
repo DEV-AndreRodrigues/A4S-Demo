@@ -62,6 +62,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 main{flex:1;width:100%;max-width:1240px;margin:0 auto;padding:40px 24px 32px}
 h1{color:var(--teal);font-size:clamp(28px,4vw,44px);font-weight:700;margin:0 0 6px;line-height:1.15}
 h1.section{font-size:clamp(26px,3vw,36px);font-weight:500;text-transform:uppercase;letter-spacing:.3px}
+h2.sub-section{font-size:clamp(18px,2.2vw,24px);font-weight:500;color:var(--teal);margin:32px 0 8px;border-bottom:1px solid var(--line);padding-bottom:8px}
 .lead{color:var(--muted);margin:0 0 28px;max-width:70ch}
 .crumbs{color:var(--muted);font-size:15px;margin:0 0 28px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .crumbs a{color:var(--muted);text-decoration:none} .crumbs a:hover{text-decoration:underline}
@@ -415,7 +416,8 @@ const state = {
   values:{}, timers:{}, intervals:{},
   sent:0, failed:0, log:[], openRow:null,
   creds:null, oauth:null, testLog:[], testOpen:null,
-  panic:{workers:null, places:null, wLoading:false, pLoading:false, wErr:'', pErr:'', sel:new Set(), place:null, q:'', acion:'Botão'}
+  panic:{workers:null, places:null, wLoading:false, pLoading:false, wErr:'', pErr:'', sel:new Set(), place:null, q:'', acion:'Botão'},
+  sd:{workers:null, wLoading:false, wErr:'', sel:new Set(), equipIdx:null}
 };
 
 /* ================= Utilitários ================= */
@@ -779,6 +781,7 @@ async function send(f, s, ctx, summary){
 }
 function fire(subId){
   if (subId==='panico') return firePanic();
+  if (subId==='homem-maquina') return fireSd();
   const hit = findSub(subId); if(!hit) return;
   const {f,s} = hit;
   if (s.campos.includes('colaborador') && !state.workers.length){ toast('Cadastre ao menos um colaborador na configuração.'); return; }
@@ -908,6 +911,7 @@ function crumbs(f){ return `<nav class="crumbs" aria-label="Navegação"><a href
 function featureView(fid){
   const f = FEATURES.find(x=>x.id===fid); if(!f) return homeView();
   if (f.id==='botao-panico') return panicView(f);
+  if (f.id==='safe-distance') return sdView(f);
   const cards = f.subs.map(s=>{
     const on = !!state.timers[s.id];
     return `<article class="panel sub">
@@ -991,6 +995,129 @@ function renderPanicLists(){
   ['wReload','pReload'].forEach(id=>{ const b=$('#'+id); if(b) b.disabled = !ready || P.wLoading || P.pLoading; });
   if (P.wErr && P.workers) toast(`Colaboradores: ${P.wErr}`);
   if (P.pErr && P.places) toast(`Ambientes: ${P.pErr}`);
+}
+
+/* ================= Safe Distance ================= */
+async function loadSdWorkers(){
+  const S = state.sd; S.wLoading=true; S.wErr=''; renderSdLists();
+  try{
+    const raw = await apiList(state.cfg.workersPath);
+    S.workers = raw.map(o=>{
+      let tag = devId(pickField(o, state.cfg.wDev));
+      const nome = String(pickField(o, state.cfg.wNome) ?? '');
+      const mat = String(pickField(o, state.cfg.wMat) ?? '');
+      const active = pickField(o, 'active|status');
+      if (!tag){ const m = findManualWorker(nome, mat); if(m&&m.tag) tag=m.tag; }
+      return {id:String(pickField(o, state.cfg.wId) ?? nome), nome, mat, tag, active};
+    }).filter(w=>w.nome && (w.active !== false)).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+    S.sel = new Set([...S.sel].filter(id=>S.workers.some(w=>w.id===id)));
+  }catch(e){ S.wErr = netErr(e); }
+  S.wLoading=false; renderSdLists();
+}
+function renderSdLists(){
+  const wl = $('#sdwList'); if(!wl) return;
+  const S = state.sd; const el = $('#sdeList');
+  const ready = apiReady();
+  // Colaboradores
+  if (!ready && !S.workers) wl.innerHTML = listState('Configure os endpoints e as credenciais da API para carregar os colaboradores.', false, true);
+  else if (S.wLoading) wl.innerHTML = listState('Carregando colaboradores…');
+  else if (S.wErr && !S.workers) wl.innerHTML = listState(`Não foi possível carregar: ${S.wErr}.`, true, true);
+  else if (S.workers){
+    wl.innerHTML = !S.workers.length ? listState('Nenhum colaborador ativo no tenant.')
+      : S.workers.map(w=>{
+          const tag = w.tag ? w.tag.toUpperCase() : '';
+          return `<label class="item"><input type="checkbox" data-sw="${esc(w.id)}"${S.sel.has(w.id)?' checked':''}><div><div class="nm">${esc(w.nome)}</div>${tag?`<div class="sub-txt">TAG ${esc(tag)}</div>`:''}</div></label>`;
+        }).join('');
+  } else wl.innerHTML = listState('Clique em "Atualizar lista" para carregar.');
+  // Equipamentos
+  const equips = state.equip;
+  if (!equips || !equips.length){
+    el.innerHTML = listState('Configure os equipamentos na aba Configuração > lista de equipamentos.');
+  } else {
+    el.innerHTML = equips.map((eq,i)=>`<label class="item"><input type="radio" name="sdequip" data-se="${i}"${S.equipIdx===i?' checked':''}><div><div class="nm">${esc(eq.nome)}</div><div class="sub-txt">${esc(eq.core)}</div></div></label>`).join('');
+  }
+  // Contadores e resumo
+  const nSel = S.sel.size;
+  const eqEl = $('#sdwCount'); if(eqEl) eqEl.textContent = S.workers ? `${nSel} de ${S.workers.length} selecionados` : '';
+  const seEl = $('#sdeCount'); if(seEl) seEl.textContent = equips.length ? `${equips.length} equipamento${equips.length>1?'s':''}` : '';
+  const equip = S.equipIdx != null ? equips[S.equipIdx] : null;
+  const sumEl = $('#sdSummary');
+  if (sumEl) sumEl.innerHTML = nSel && equip ? `Safe Distance para <strong>${nSel} colaborador${nSel>1?'es':''}</strong> perto de <strong>${esc(equip.nome)}</strong>.`
+    : nSel ? 'Escolha o equipamento.' : 'Selecione ao menos um colaborador.';
+  const fb = $('#sdFire'); if(fb){ fb.textContent = nSel>1 ? `Gerar ${nSel} eventos` : 'Gerar evento'; fb.disabled = !(nSel && equip); }
+  const rb = $('#sdwReload'); if(rb) rb.disabled = !ready || S.wLoading;
+}
+async function fireSd(){
+  const S = state.sd;
+  const equip = state.equip[S.equipIdx];
+  if (!equip) return;
+  const sub = FEATURES.find(f=>f.id==='safe-distance').subs[0];
+  const workers = (S.workers||[]).filter(w=>S.sel.has(w.id));
+  if (!workers.length) return;
+  for (const w of workers){
+    const msgId = uuid();
+    const payload = {type:'safe_distance.person_machine', worker:{id:w.id, nome:w.nome, tag:w.tag||null}, equipment:{nome:equip.nome, core:equip.core}, timestamp:new Date().toISOString(), messageId:msgId};
+    const summary = `${w.nome} – ${equip.nome}`;
+    if (state.mode==='sim'){
+      state.sent++;
+      addLog({f:sub, s:sub, summary, status:'sim', code:'Simulado', payload});
+    } else {
+      const url = apiUrl(state.cfg.ingestPath);
+      if (!url){ state.failed++; addLog({f:sub, s:sub, summary, status:'err', code:'Sem endpoint', payload}); }
+      else {
+        try{
+          const headers = {'Content-Type':'application/json', ...(await authHeaders())};
+          const res = await fetchT(url, {method:'POST', headers, body:JSON.stringify(payload)}, 8000);
+          res.ok ? state.sent++ : state.failed++;
+          addLog({f:sub, s:sub, summary, status:res.ok?'ok':'err', code:`HTTP ${res.status}`, payload});
+        }catch(err){
+          state.failed++;
+          addLog({f:sub, s:sub, summary, status:'err', code:netErr(err), payload:{erro:err.message, colaborador:{nome:w.nome, tag:w.tag||null}, equipamento:{nome:equip.nome, core:equip.core}}});
+        }
+      }
+    }
+  }
+  refreshStats();
+}
+function sdView(f){
+  const sub = f.subs[0]; const sub2 = f.subs[1]; const S = state.sd;
+  const on = !!state.timers[sub.id];
+  return `<h1 class="section">${esc(f.nome)}</h1>${crumbs(f)}
+    <p class="lead">${esc(f.desc)}</p>
+    <h2 class="sub-section">${esc(sub.nome)}</h2>
+    <p class="lead" style="margin-top:0">${esc(sub.desc)}</p>
+    <div class="panic-layout">
+      <section class="panel pick" aria-labelledby="sdwTitle">
+        <div class="pick-head"><h2 id="sdwTitle">Colaboradores</h2><span class="count" id="sdwCount"></span></div>
+        <div class="pick-tools">
+          <button class="link-btn" type="button" id="sdwAll">Selecionar todos</button>
+          <button class="link-btn" type="button" id="sdwNone">Limpar seleção</button>
+          <button class="link-btn" type="button" id="sdwReload" style="margin-left:auto">Atualizar lista</button>
+        </div>
+        <div class="list" id="sdwList" role="group" aria-label="Colaboradores com dispositivo"></div>
+      </section>
+      <section class="panel pick" aria-labelledby="sdeTitle">
+        <div class="pick-head"><h2 id="sdeTitle">Equipamento</h2><span class="count" id="sdeCount"></span></div>
+        <div class="pick-tools"><span class="count">Um equipamento por evento</span></div>
+        <div class="list" id="sdeList" role="radiogroup" aria-label="Equipamentos disponíveis"></div>
+      </section>
+    </div>
+    <div class="panel panic-bar">
+      <div class="summary" id="sdSummary"></div>
+      <span class="badge ${on?'on':'off'}">${on?'Automático ativo':'Parado'}</span>
+      <button class="btn primary" type="button" id="sdFire">Gerar evento</button>
+      ${autoControls(sub.id)}
+    </div>
+    <h2 class="sub-section" style="margin-top:32px">${esc(sub2.nome)}</h2>
+    <div class="subgrid">
+      <article class="panel sub">
+        <div class="sub-head"><span class="badge ${!!state.timers[sub2.id]?'on':'off'}">${!!state.timers[sub2.id]?'Automático ativo':'Parado'}</span></div>
+        <h3>${esc(sub2.nome)}</h3>
+        <p class="sub-desc">${esc(sub2.desc)}</p>
+        <div class="sub-foot">${autoControls(sub2.id)}</div>
+      </article>
+    </div>
+    ${consoleBlock()}`;
 }
 
 /* ---------- Página de configuração ---------- */
@@ -1266,6 +1393,11 @@ function route(){
     if (apiReady() && !P.workers && !P.wLoading && !P.wErr) loadPanicWorkers();
     if (apiReady() && !P.places && !P.pLoading && !P.pErr) loadPanicPlaces();
   }
+  if (m && m[1]==='safe-distance'){
+    renderSdLists();
+    const S = state.sd;
+    if (apiReady() && !S.workers && !S.wLoading && !S.wErr) loadSdWorkers();
+  }
 }
 function applyMode(){
   const live = state.mode==='live';
@@ -1308,6 +1440,10 @@ document.addEventListener('click', async e=>{
     case 'pReload': state.panic.pErr=''; loadPanicPlaces(); return;
     case 'wAll': { const P=state.panic; (P.workers||[]).forEach(w=>P.sel.add(w.id)); renderPanicLists(); return; }
     case 'wNone': state.panic.sel.clear(); renderPanicLists(); return;
+    case 'sdwReload': state.sd.wErr=''; loadSdWorkers(); return;
+    case 'sdwAll': { const S=state.sd; (S.workers||[]).forEach(w=>S.sel.add(w.id)); renderSdLists(); return; }
+    case 'sdwNone': state.sd.sel.clear(); renderSdLists(); return;
+    case 'sdFire': fireSd(); return;
     case 'apiSave': saveApiFromForm(); return;
     case 'apiTest': testApi(); return;
     case 'testLogClear': state.testLog=[]; state.testOpen=null; renderTestLog(); return;
@@ -1378,6 +1514,8 @@ document.addEventListener('change', e=>{
   }
   if (t.dataset.w!==undefined){ const P=state.panic; t.checked ? P.sel.add(t.dataset.w) : P.sel.delete(t.dataset.w); renderPanicLists(); return; }
   if (t.dataset.p!==undefined){ state.panic.place = t.dataset.p; renderPanicLists(); return; }
+  if (t.dataset.sw!==undefined){ const S=state.sd; t.checked ? S.sel.add(t.dataset.sw) : S.sel.delete(t.dataset.sw); renderSdLists(); return; }
+  if (t.dataset.se!==undefined){ state.sd.equipIdx = +t.dataset.se; renderSdLists(); return; }
   if (t.name==='mode'){ state.mode = t.value; applyMode(); try{localStorage.setItem('a4s-demo-mode',t.value);}catch(e){} toast(t.value==='live'?'Envio real ativado.':'Modo simulação ativado.'); return; }
   if (t.id==='cAuth'){ $('#authHeadersBox').hidden = t.value==='oauth'; $('#authOauthBox').hidden = t.value!=='oauth'; }
 });
