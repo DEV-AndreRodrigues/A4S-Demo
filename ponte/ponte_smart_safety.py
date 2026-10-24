@@ -47,8 +47,6 @@ LISTEN_PORT = int(os.environ.get("BRIDGE_PORT") or _CFG.get("bridge_port") or 87
 _env_origins = os.environ.get("BRIDGE_ALLOWED_ORIGINS")
 ALLOWED_ORIGINS = set(o.strip() for o in _env_origins.split(",")) if _env_origins else set(_CFG.get("allowed_origins") or ["null"])
 
-# Só aceita o frame do Botão de Pânico. Ampliar aqui quando outros tipos forem definidos.
-ALLOWED = {(12, 100)}
 KEYS = ["type", "id", "code", "data", "date", "messageId"]
 RE_DATA = re.compile(r"^[0-9A-F]{16}$")
 RE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -64,8 +62,6 @@ HOP_BY_HOP = {"x-upstream-url"}
 def validate(frame):
     if not isinstance(frame, dict) or sorted(frame) != sorted(KEYS):
         return "frame com campos inesperados"
-    if (frame["type"], frame["code"]) not in ALLOWED:
-        return "type/code não permitido pela ponte"
     if not isinstance(frame["id"], str) or not RE_ID.match(frame["id"]):
         return "id do CORE inválido"
     if not isinstance(frame["data"], str) or not RE_DATA.match(frame["data"]):
